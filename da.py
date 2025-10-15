@@ -773,7 +773,7 @@ MAIN_HTML = '''
             5: 'Самара', 25: 'Краснодар', 73: 'Ростов-на-Дону', 0: 'Вся Россия'
         };
 
-        let currentCities = [2];
+        let currentCities = [];
 
         function logout() {
             if (confirm('Credentials встроены в код. Вы уверены, что хотите выйти?')) {
@@ -826,6 +826,10 @@ MAIN_HTML = '''
             
             document.getElementById('exclusionBlock').style.display = source === 'hh' ? 'block' : 'none';
             
+            // Set default city for the new source
+            const defaultId = currentSource === 'hh' ? 2 : 4;
+            currentCities = [defaultId]; // Reset to default for the new source
+            
             loadCities();
         }
 
@@ -834,15 +838,15 @@ MAIN_HTML = '''
             const container = document.getElementById('cityOptions');
             container.innerHTML = '';
             
-            const defaultId = currentSource === 'hh' ? 2 : 4;
-            currentCities = [defaultId];
-            
             for (const [id, name] of Object.entries(cities)) {
+                const cityId = parseInt(id);
+                const isChecked = currentCities.includes(cityId); // Check if city is in currentCities
+                
                 const div = document.createElement('div');
                 div.className = 'city-option';
                 div.innerHTML = `
                     <label>
-                        <input type="checkbox" value="${id}" ${id == defaultId ? 'checked' : ''} onchange="updateCitySelection()">
+                        <input type="checkbox" value="${id}" ${isChecked ? 'checked' : ''} onchange="updateCitySelection()">
                         ${name}
                     </label>
                 `;
@@ -1052,41 +1056,58 @@ MAIN_HTML = '''
             }
             
             try {
-                const params = new URLSearchParams({
-                    keyword: currentQuery, count: 100, page: currentPage,
-                    order_field: 'date', order_direction: 'desc'
-                });
+                let allVacancies = [];
+                let totalFoundForSJ = 0;
+                let hasMoreForSJ = false;
 
-                currentCities.forEach(c => params.append('t', c));
-                if (document.getElementById('lastTwoDays')?.checked) params.append('date_published_from', getUnixTimeDaysAgo(2));
-                else if (document.getElementById('freshOnly')?.checked) params.append('date_published_from', getUnixTimeDaysAgo(30));
-                if (document.getElementById('withSalary')?.checked) params.append('no_agreement', '1');
-                if (document.getElementById('noExp')?.checked) params.append('experience', '1');
-                if (document.getElementById('fullTime')?.checked) params.append('type_of_work', '6');
+                // If multiple cities are selected, make separate requests
+                const citiesToSearch = currentCities.length > 0 ? currentCities : [0]; // Default to 'Вся Россия' if no cities selected
 
-                const apiUrl = `https://api.superjob.ru/2.0/vacancies/?${params}`;
-                const proxyUrl = `/proxy?url=${encodeURIComponent(apiUrl)}&key=${encodeURIComponent(secretKey)}`;
-                
-                const response = await fetch(proxyUrl);
-                
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error('Proxy error:', errorText);
-                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                for (const cityId of citiesToSearch) {
+                    const params = new URLSearchParams({
+                        keyword: currentQuery, count: 100, page: currentPage,
+                        order_field: 'date', order_direction: 'desc'
+                    });
+
+                    params.append('t', cityId); // Append only one city ID per request
+
+                    if (document.getElementById('lastTwoDays')?.checked) params.append('date_published_from', getUnixTimeDaysAgo(2));
+                    else if (document.getElementById('freshOnly')?.checked) params.append('date_published_from', getUnixTimeDaysAgo(30));
+                    if (document.getElementById('withSalary')?.checked) params.append('no_agreement', '1');
+                    if (document.getElementById('noExp')?.checked) params.append('experience', '1');
+                    if (document.getElementById('fullTime')?.checked) params.append('type_of_work', '6');
+
+                    const apiUrl = `https://api.superjob.ru/2.0/vacancies/?${params}`;
+                    const proxyUrl = `/proxy?url=${encodeURIComponent(apiUrl)}&key=${encodeURIComponent(secretKey)}`;
+                    
+                    const response = await fetch(proxyUrl);
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('Proxy error:', errorText);
+                        throw new Error(`HTTP ${response.status}: ${errorText}`);
+                    }
+                    
+                    const data = await response.json();
+                    totalFoundForSJ += data.total;
+                    if (data.more) hasMoreForSJ = true; // If any city has more, then overall has more
+                    
+                    if (data.objects?.length > 0) {
+                        allVacancies = allVacancies.concat(data.objects);
+                    }
                 }
-                
-                const data = await response.json();
-                totalFound = data.total;
-                hasMore = data.more;
+
+                totalFound = totalFoundForSJ;
+                hasMore = hasMoreForSJ;
 
                 const tbody = document.getElementById('vacancyTableBody');
                 if (currentPage === 0) tbody.innerHTML = '';
 
-                if (data.objects?.length > 0) {
+                if (allVacancies.length > 0) {
                     const companiesAdded = new Set();
                     const oneVacancyPerCompany = document.getElementById('oneVacancyPerCompany')?.checked;
 
-                    data.objects.forEach(v => {
+                    allVacancies.forEach(v => {
                         const companyName = v.firm_name || '—';
 
                         if (oneVacancyPerCompany && companiesAdded.has(companyName)) {
@@ -1186,6 +1207,10 @@ MAIN_HTML = '''
         }
 
         window.onload = () => {
+            // Set initial default city
+            const defaultId = currentSource === 'hh' ? 2 : 4;
+            currentCities = [defaultId];
+            
             loadCities();
             
             document.getElementById('exclusionInput').addEventListener('keypress', (e) => {
