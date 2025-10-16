@@ -2,11 +2,15 @@
 # Полное приложение для поиска вакансий HH.ru + SuperJob
 # Для PythonAnywhere
 
-from flask import Flask, request, Response, render_template_string
+from flask import Flask, request, Response, render_template_string, redirect, url_for
 import requests
 import json
 
 app = Flask(__name__)
+
+@app.route('/favicon.ico')
+def favicon():
+    return redirect(url_for('static', filename='favicon.ico'), code=302)
 
 # ============ ВШИТЫЕ CREDENTIALS ============
 SUPERJOB_APP_ID = "4014"
@@ -123,9 +127,10 @@ def index():
 CALLBACK_HTML = '''
 <!DOCTYPE html>
 <html lang="ru">
-<head>    
+<head>
     <meta charset="UTF-8">
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" href="/static/favicon.ico?v=2">
+    <link rel="shortcut icon" href="/static/favicon.ico?v=2">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SuperJob OAuth Callback</title>
     <style>
@@ -204,6 +209,11 @@ MAIN_HTML = '''
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Вакансии - HH.ru и SuperJob</title>
+
+    <!-- ВСТАВИТЬ ЭТИ 2 СТРОКИ -->
+    <link rel="icon" href="/static/favicon.ico?v=2">
+    <link rel="shortcut icon" href="/static/favicon.ico?v=2">
+
     <style>
         * { box-sizing: border-box; }
         body {
