@@ -16,16 +16,21 @@ SUPERJOB_SECRET_KEY = "v3.r.138979256.3b5b15795a107a49a55e7f4e5eed1857dfe78cde.d
 @app.route('/proxy')
 def proxy():
     target_url = request.args.get('url')
-    api_key = request.args.get('key', SUPERJOB_SECRET_KEY)
     
     if not target_url:
         return {'error': 'URL parameter required'}, 400
     
     try:
         headers = {
-            'X-Api-App-Id': api_key,
             'User-Agent': 'VacancyParser/1.0'
         }
+        
+        # Передаем заголовок Authorization, если он есть в исходном запросе
+        if 'Authorization' in request.headers:
+            headers['Authorization'] = request.headers['Authorization']
+        
+        # Для SuperJob API также требуется X-Api-App-Id
+        headers['X-Api-App-Id'] = SUPERJOB_SECRET_KEY
         
         response = requests.get(target_url, headers=headers, timeout=30)
         
@@ -45,6 +50,59 @@ def proxy():
 def callback():
     return render_template_string(CALLBACK_HTML)
 
+# ============ OAUTH TOKEN EXCHANGE ============
+@app.route('/get_sj_tokens', methods=['POST'])
+def get_sj_tokens():
+    data = request.get_json()
+    code = data.get('code')
+    redirect_uri = data.get('redirect_uri')
+    client_id = data.get('client_id')
+    client_secret = data.get('client_secret')
+
+    if not all([code, redirect_uri, client_id, client_secret]):
+        return {'error': 'Missing parameters'}, 400
+
+    token_url = "https://api.superjob.ru/2.0/oauth2/access_token/"
+    params = {
+        'code': code,
+        'redirect_uri': redirect_uri,
+        'client_id': client_id,
+        'client_secret': client_secret
+    }
+
+    try:
+        response = requests.get(token_url, params=params, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error getting SJ tokens: {e}")
+        return {'error': str(e)}, 500
+
+@app.route('/refresh_sj_token', methods=['POST'])
+def refresh_sj_token():
+    data = request.get_json()
+    refresh_token = data.get('refresh_token')
+    client_id = data.get('client_id')
+    client_secret = data.get('client_secret')
+
+    if not all([refresh_token, client_id, client_secret]):
+        return {'error': 'Missing parameters'}, 400
+
+    refresh_url = "https://api.superjob.ru/2.0/oauth2/refresh_token/"
+    params = {
+        'refresh_token': refresh_token,
+        'client_id': client_id,
+        'client_secret': client_secret
+    }
+
+    try:
+        response = requests.get(refresh_url, params=params, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error refreshing SJ token: {e}")
+        return {'error': str(e)}, 500
+
 # ============ ГЛАВНАЯ СТРАНИЦА ============
 @app.route('/')
 def index():
@@ -57,7 +115,6 @@ def index():
             client_id: '{SUPERJOB_APP_ID}',
             client_secret: '{SUPERJOB_SECRET_KEY}'
         }}));
-        localStorage.setItem('sj_secret_key', '{SUPERJOB_SECRET_KEY}');
         '''
     )
     return render_template_string(html)
@@ -122,16 +179,14 @@ CALLBACK_HTML = '''
             setTimeout(() => window.close(), 3000);
         } else if (code) {
             messageEl.textContent = `✅ Код получен: ${code.substring(0, 10)}...`;
-            localStorage.setItem('sj_auth_code', code);
-            setTimeout(() => {
+            // Отправляем код на родительское окно для обмена на токены
+            if (window.opener) {
+                window.opener.postMessage({ type: 'sj_auth_success', code }, '*');
                 messageEl.textContent = '✅ Готово! Можно закрыть это окно.';
-                if (window.opener) {
-                    window.opener.postMessage({ type: 'sj_auth_success', code }, '*');
-                    setTimeout(() => window.close(), 1000);
-                } else {
-                    messageEl.textContent = '✅ Вернитесь на главную страницу';
-                }
-            }, 1000);
+                setTimeout(() => window.close(), 1000);
+            } else {
+                messageEl.textContent = '✅ Вернитесь на главную страницу';
+            }
         } else {
             messageEl.textContent = '⚠️ Не получен код авторизации';
         }
@@ -587,6 +642,30 @@ MAIN_HTML = '''
         .badge-source.hh { background: #00a0e1; }
         .badge-source.sj { background: #ff8800; }
 
+        .contacts {
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .contact-phone {
+            color: #27ae60;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .contact-email {
+            color: #3498db;
+            font-size: 12px;
+        }
+        .contact-name {
+            color: #7f8c8d;
+            font-size: 11px;
+            font-style: italic;
+        }
+        .no-contacts {
+            color: #bdc3c7;
+            font-style: italic;
+            font-size: 12px;
+        }
+
         @media (max-width: 768px) {
             body { padding: 10px; }
             .container { padding: 15px; }
@@ -599,13 +678,14 @@ MAIN_HTML = '''
         <h1>🏭 Вакансии линейного персонала</h1>
         <p class="subtitle">Грузчики • Кладовщики • Комплектовщики • Упаковщики • Разнорабочие</p>
 
-        <div class="auth-status" id="authStatus">
+        <div class="auth-status logged-out" id="authStatus">
             <div class="auth-info">
-                <h3 id="authTitle">✅ SuperJob: Авторизован</h3>
-                <p id="authText">App ID: 4014 (встроенный)</p>
+                <h3 id="authTitle">🟠 SuperJob: Не авторизован</h3>
+                <p id="authText">Для поиска вакансий SuperJob требуется авторизация.</p>
             </div>
             <div class="auth-actions">
-                <button onclick="logout()" id="btnLogout">Выйти</button>
+                <button onclick="authorizeSuperJob()" id="btnAuthorize">Войти через SuperJob</button>
+                <button onclick="logout()" id="btnLogout" style="display: none;">Выйти</button>
             </div>
         </div>
 
@@ -724,11 +804,12 @@ MAIN_HTML = '''
             <table id="vacancyTable">
                 <thead>
                     <tr>
-                        <th style="width: 35%;">Должность</th>
-                        <th style="width: 25%;">Компания</th>
-                        <th style="width: 15%;">Зарплата</th>
-                        <th style="width: 15%;">Город</th>
-                        <th style="width: 10%;">Дата</th>
+                        <th style="width: 25%;">Должность</th>
+                        <th style="width: 20%;">Компания</th>
+                        <th style="width: 12%;">Зарплата</th>
+                        <th style="width: 12%;">Город</th>
+                        <th style="width: 8%;">Дата</th>
+                        <th style="width: 23%;">Контакты</th>
                     </tr>
                 </thead>
                 <tbody id="vacancyTableBody">
@@ -749,6 +830,14 @@ MAIN_HTML = '''
         // CREDENTIALS_PLACEHOLDER
         
         const API_BASE = 'https://api.superjob.ru/2.0';
+        const SUPERJOB_CLIENT_ID = '4014'; // Ваш client_id
+        const SUPERJOB_SECRET_KEY = 'v3.r.138979256.3b5b15795a107a49a55e7f4e5eed1857dfe78cde.dda83a292af5754f027da2f0c96152b9b34f0dee'; // Ваш secret_key
+        const SUPERJOB_REDIRECT_URI = 'http://127.0.0.1:8000/callback';
+
+        let sjAccessToken = localStorage.getItem('sj_access_token');
+        let sjRefreshToken = localStorage.getItem('sj_refresh_token');
+        let sjExpiresIn = localStorage.getItem('sj_expires_in');
+        let sjAuthWindow = null;
 
         let currentPage = 0;
         let isLoading = false;
@@ -776,10 +865,118 @@ MAIN_HTML = '''
         let currentCities = [];
 
         function logout() {
-            if (confirm('Credentials встроены в код. Вы уверены, что хотите выйти?')) {
-                alert('Перезагрузите страницу для повторной авторизации');
+            if (confirm('Вы уверены, что хотите выйти из SuperJob?')) {
+                localStorage.removeItem('sj_access_token');
+                localStorage.removeItem('sj_refresh_token');
+                localStorage.removeItem('sj_expires_in');
+                sjAccessToken = null;
+                sjRefreshToken = null;
+                sjExpiresIn = null;
+                updateAuthStatus();
+                alert('Вы вышли из SuperJob. Перезагрузите страницу для повторной авторизации.');
             }
         }
+
+        function authorizeSuperJob() {
+            const authUrl = `https://www.superjob.ru/authorize/?client_id=${SUPERJOB_CLIENT_ID}&redirect_uri=${encodeURIComponent(SUPERJOB_REDIRECT_URI)}&state=superjob_auth`;
+            sjAuthWindow = window.open(authUrl, '_blank', 'width=600,height=700');
+        }
+
+        async function getTokens(code) {
+            try {
+                const response = await fetch('/get_sj_tokens', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code: code,
+                        redirect_uri: SUPERJOB_REDIRECT_URI,
+                        client_id: SUPERJOB_CLIENT_ID,
+                        client_secret: SUPERJOB_SECRET_KEY
+                    })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                
+                sjAccessToken = data.access_token;
+                sjRefreshToken = data.refresh_token;
+                sjExpiresIn = Date.now() + (data.expires_in * 1000); // Время истечения в миллисекундах
+                
+                localStorage.setItem('sj_access_token', sjAccessToken);
+                localStorage.setItem('sj_refresh_token', sjRefreshToken);
+                localStorage.setItem('sj_expires_in', sjExpiresIn);
+                
+                updateAuthStatus();
+                return true;
+            } catch (error) {
+                console.error('Ошибка при получении токенов:', error);
+                alert('Ошибка авторизации SuperJob. Пожалуйста, попробуйте снова.');
+                return false;
+            }
+        }
+
+        async function refreshAccessToken() {
+            if (!sjRefreshToken) return false;
+            try {
+                const response = await fetch('/refresh_sj_token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        refresh_token: sjRefreshToken,
+                        client_id: SUPERJOB_CLIENT_ID,
+                        client_secret: SUPERJOB_SECRET_KEY
+                    })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+
+                sjAccessToken = data.access_token;
+                sjRefreshToken = data.refresh_token;
+                sjExpiresIn = Date.now() + (data.expires_in * 1000);
+
+                localStorage.setItem('sj_access_token', sjAccessToken);
+                localStorage.setItem('sj_refresh_token', sjRefreshToken);
+                localStorage.setItem('sj_expires_in', sjExpiresIn);
+                
+                updateAuthStatus();
+                return true;
+            } catch (error) {
+                console.error('Ошибка при обновлении токена:', error);
+                logout(); // Если не удалось обновить, выходим
+                return false;
+            }
+        }
+
+        function updateAuthStatus() {
+            const authStatusDiv = document.getElementById('authStatus');
+            const authTitle = document.getElementById('authTitle');
+            const authText = document.getElementById('authText');
+            const btnAuthorize = document.getElementById('btnAuthorize');
+            const btnLogout = document.getElementById('btnLogout');
+
+            if (sjAccessToken && sjExpiresIn && Date.now() < parseInt(sjExpiresIn)) {
+                authStatusDiv.classList.remove('logged-out');
+                authStatusDiv.style.background = 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'; // Зеленый
+                authTitle.textContent = '✅ SuperJob: Авторизован';
+                authText.textContent = `Токен действителен до: ${new Date(parseInt(sjExpiresIn)).toLocaleTimeString()} ${new Date(parseInt(sjExpiresIn)).toLocaleDateString()}`;
+                btnAuthorize.style.display = 'none';
+                btnLogout.style.display = 'block';
+            } else {
+                authStatusDiv.classList.add('logged-out');
+                authStatusDiv.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)'; // Серый
+                authTitle.textContent = '🟠 SuperJob: Не авторизован';
+                authText.textContent = 'Для поиска вакансий SuperJob требуется авторизация.';
+                btnAuthorize.style.display = 'block';
+                btnLogout.style.display = 'none';
+            }
+        }
+
+        window.addEventListener('message', async (event) => {
+            if (event.origin !== window.location.origin) return;
+            if (event.data.type === 'sj_auth_success' && event.data.code) {
+                if (sjAuthWindow) sjAuthWindow.close();
+                await getTokens(event.data.code);
+            }
+        });
 
         function getDateDaysAgo(days) {
             const date = new Date();
@@ -1001,6 +1198,41 @@ MAIN_HTML = '''
                         if (v.salary) withSalaryCount++;
                         loadedCount++;
 
+                        // Форматирование контактов
+                        let contactsHTML = '<span class="no-contacts">—</span>';
+                        if (v.contacts) {
+                            let contactParts = [];
+                            
+                            // Телефоны
+                            if (v.contacts.phones && v.contacts.phones.length > 0) {
+                                const phones = v.contacts.phones.map(p => {
+                                    let phoneStr = p.country ? `+${p.country} ` : '';
+                                    phoneStr += p.city ? `(${p.city}) ` : '';
+                                    phoneStr += p.number || '';
+                                    phoneStr += p.comment ? ` ${p.comment}` : '';
+                                    return `<span class="contact-phone">${phoneStr}</span>`;
+                                }).join('<br>');
+                                contactParts.push(phones);
+                            }
+                            
+                            // Email
+                            if (v.contacts.email) {
+                                contactParts.push(`<span class="contact-email">${v.contacts.email}</span>`);
+                            }
+                            
+                            // Имя контакта
+                            if (v.contacts.name) {
+                                contactParts.push(`<span class="contact-name">${v.contacts.name}</span>`);
+                            }
+                            
+                            if (contactParts.length > 0) {
+                                contactsHTML = `<div class="contacts">${contactParts.join('<br>')}</div>`;
+                            }
+                        }
+
+                        if (v.salary) withSalaryCount++;
+                        loadedCount++;
+
                         const row = document.createElement("tr");
                         row.innerHTML = `
                             <td class="vacancy-title">
@@ -1012,6 +1244,7 @@ MAIN_HTML = '''
                             <td class="salary">${salary}</td>
                             <td class="location">${v.area?.name || 'Не указано'}</td>
                             <td class="date">${formatDate(v.published_at)}</td>
+                            <td>${contactsHTML}</td>
                         `;
                         row.onclick = () => window.open(`https://hh.ru/vacancy/${v.id}`, '_blank');
                         tbody.appendChild(row);
@@ -1024,34 +1257,33 @@ MAIN_HTML = '''
                     updateStats();
                     currentPage++;
                 } else if (currentPage === 0) {
-                    tbody.innerHTML = `<tr><td colspan="5" class="no-results">😔 Не найдено</td></tr>`;
-                    hasMore = false;
-                }
-
-            } catch (error) {
-                console.error('HH Error:', error);
-                handleError(error);
-            } finally {
-                isLoading = false;
-                document.getElementById('loadingIndicator').style.display = 'none';
+                tbody.innerHTML = `<tr><td colspan="6" class="no-results">😔 Не найдено</td></tr>`;
+                hasMore = false;
             }
+
+        } catch (error) {
+            console.error('HH Error:', error);
+            handleError(error);
+        } finally {
+            isLoading = false;
+            document.getElementById('loadingIndicator').style.display = 'none';
         }
+    }
 
         async function loadFromSuperJob() {
             isLoading = true;
             document.getElementById('loadingIndicator').style.display = 'block';
             
-            const secretKey = localStorage.getItem('sj_secret_key');
-            
-            if (!secretKey) {
+            if (!sjAccessToken || (sjExpiresIn && Date.now() >= parseInt(sjExpiresIn) && !(await refreshAccessToken()))) {
                 document.getElementById('vacancyTableBody').innerHTML = `
-                    <tr><td colspan="5" style="text-align:center; padding: 40px;">
-                        <h3>⚠️ Ошибка авторизации</h3>
-                        <p>Перезагрузите страницу</p>
+                    <tr><td colspan="6" style="text-align:center; padding: 40px;">
+                        <h3>⚠️ SuperJob: Требуется авторизация</h3>
+                        <p>Пожалуйста, войдите через SuperJob.</p>
                     </td></tr>
                 `;
                 isLoading = false; hasMore = false;
                 document.getElementById('loadingIndicator').style.display = 'none';
+                updateAuthStatus();
                 return;
             }
             
@@ -1060,35 +1292,39 @@ MAIN_HTML = '''
                 let totalFoundForSJ = 0;
                 let hasMoreForSJ = false;
 
-                // If multiple cities are selected, make separate requests
-                const citiesToSearch = currentCities.length > 0 ? currentCities : [0]; // Default to 'Вся Россия' if no cities selected
+            // If multiple cities are selected, make separate requests
+            const citiesToSearch = currentCities.length > 0 ? currentCities : [0]; // Default to 'Вся Россия' if no cities selected
 
-                for (const cityId of citiesToSearch) {
-                    const params = new URLSearchParams({
-                        keyword: currentQuery, count: 100, page: currentPage,
-                        order_field: 'date', order_direction: 'desc'
-                    });
+            for (const cityId of citiesToSearch) {
+                const params = new URLSearchParams({
+                    keyword: currentQuery, count: 100, page: currentPage,
+                    order_field: 'date', order_direction: 'desc'
+                });
 
-                    params.append('t', cityId); // Append only one city ID per request
+                params.append('t', cityId); // Append only one city ID per request
 
-                    if (document.getElementById('lastTwoDays')?.checked) params.append('date_published_from', getUnixTimeDaysAgo(2));
-                    else if (document.getElementById('freshOnly')?.checked) params.append('date_published_from', getUnixTimeDaysAgo(30));
-                    if (document.getElementById('withSalary')?.checked) params.append('no_agreement', '1');
-                    if (document.getElementById('noExp')?.checked) params.append('experience', '1');
-                    if (document.getElementById('fullTime')?.checked) params.append('type_of_work', '6');
+                if (document.getElementById('lastTwoDays')?.checked) params.append('date_published_from', getUnixTimeDaysAgo(2));
+                else if (document.getElementById('freshOnly')?.checked) params.append('date_published_from', getUnixTimeDaysAgo(30));
+                if (document.getElementById('withSalary')?.checked) params.append('no_agreement', '1');
+                if (document.getElementById('noExp')?.checked) params.append('experience', '1');
+                if (document.getElementById('fullTime')?.checked) params.append('type_of_work', '6');
 
-                    const apiUrl = `https://api.superjob.ru/2.0/vacancies/?${params}`;
-                    const proxyUrl = `/proxy?url=${encodeURIComponent(apiUrl)}&key=${encodeURIComponent(secretKey)}`;
-                    
-                    const response = await fetch(proxyUrl);
-                    
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        console.error('Proxy error:', errorText);
-                        throw new Error(`HTTP ${response.status}: ${errorText}`);
+                const apiUrl = `https://api.superjob.ru/2.0/vacancies/?${params}`;
+                const proxyUrl = `/proxy?url=${encodeURIComponent(apiUrl)}`; // Убираем key, так как токен будет в заголовке
+                
+                const response = await fetch(proxyUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${sjAccessToken}`
                     }
-                    
-                    const data = await response.json();
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Proxy error:', errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const data = await response.json();
                     totalFoundForSJ += data.total;
                     if (data.more) hasMoreForSJ = true; // If any city has more, then overall has more
                     
@@ -1122,6 +1358,24 @@ MAIN_HTML = '''
                         if (v.payment_from || v.payment_to) withSalaryCount++;
                         loadedCount++;
 
+                        // Форматирование контактов для SuperJob
+                        let sjContactsHTML = '<span class="no-contacts">—</span>';
+                        let sjContactParts = [];
+
+                        if (v.phone) {
+                            sjContactParts.push(`<span class="contact-phone">${v.phone}</span>`);
+                        }
+                        if (v.email) {
+                            sjContactParts.push(`<span class="contact-email">${v.email}</span>`);
+                        }
+                        if (v.contact) {
+                            sjContactParts.push(`<span class="contact-name">${v.contact}</span>`);
+                        }
+
+                        if (sjContactParts.length > 0) {
+                            sjContactsHTML = `<div class="contacts">${sjContactParts.join('<br>')}</div>`;
+                        }
+
                         const row = document.createElement("tr");
                         row.innerHTML = `
                             <td class="vacancy-title">${v.profession}${isNewFromUnix(v.date_published) ? '<span class="badge-new">NEW</span>' : ''}<span class="badge-source sj">SJ</span></td>
@@ -1129,6 +1383,7 @@ MAIN_HTML = '''
                             <td class="salary">${salary}</td>
                             <td class="location">${v.town?.title || '—'}</td>
                             <td class="date">${formatDateFromUnix(v.date_published)}</td>
+                            <td>${sjContactsHTML}</td>
                         `;
                         row.onclick = () => window.open(v.link, '_blank');
                         tbody.appendChild(row);
@@ -1141,7 +1396,7 @@ MAIN_HTML = '''
                     updateStats();
                     currentPage++;
                 } else if (currentPage === 0) {
-                    tbody.innerHTML = `<tr><td colspan="5" class="no-results">😔 Не найдено</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="6" class="no-results">😔 Не найдено</td></tr>`;
                     hasMore = false;
                 }
 
@@ -1159,7 +1414,7 @@ MAIN_HTML = '''
             if (currentPage === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="5" style="text-align:center; color:#e74c3c; padding: 40px;">
+                        <td colspan="6" style="text-align:center; color:#e74c3c; padding: 40px;">
                             ⚠️ Ошибка: ${error.message}<br>
                             <button onclick="startNewSearch()" style="margin-top: 15px;">🔄 Повторить</button>
                         </td>
@@ -1212,6 +1467,7 @@ MAIN_HTML = '''
             currentCities = [defaultId];
             
             loadCities();
+            updateAuthStatus(); // Обновляем статус авторизации при загрузке страницы
             
             document.getElementById('exclusionInput').addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') addExclusion();
