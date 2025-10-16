@@ -5,18 +5,9 @@
 from flask import Flask, request, Response, render_template_string
 import requests
 import json
-import os
-from flask import send_from_directory
-
 
 app = Flask(__name__)
-@app.route('/favicon.ico')
-def favicon():
-    return send_from_directory(
-        os.path.join(app.root_path, 'static'),
-        'favicon.ico',
-        mimetype='image/vnd.microsoft.icon'
-    )
+
 # ============ ВШИТЫЕ CREDENTIALS ============
 SUPERJOB_APP_ID = "4014"
 SUPERJOB_SECRET_KEY = "v3.r.138979256.3b5b15795a107a49a55e7f4e5eed1857dfe78cde.dda83a292af5754f027da2f0c96152b9b34f0dee"
