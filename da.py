@@ -75,15 +75,17 @@ def get_sj_tokens():
         return {'error': 'Missing parameters'}, 400
 
     token_url = "https://api.superjob.ru/2.0/oauth2/access_token/"
-    params = {
+    payload = {
         'code': code,
         'redirect_uri': redirect_uri,
         'client_id': client_id,
-        'client_secret': client_secret
+        'client_secret': client_secret,
+        'grant_type': 'authorization_code' # Добавляем grant_type
     }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
     try:
-        response = requests.get(token_url, params=params, timeout=30)
+        response = requests.post(token_url, data=payload, headers=headers, timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -238,6 +240,7 @@ CALLBACK_HTML = '''
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
         const error = urlParams.get('error');
+        const state = urlParams.get('state'); // Получаем параметр state
         const messageEl = document.getElementById('message');
 
         if (error) {
@@ -245,9 +248,12 @@ CALLBACK_HTML = '''
             setTimeout(() => window.close(), 3000);
         } else if (code) {
             messageEl.textContent = `✅ Код получен: ${code.substring(0, 10)}...`;
-            // Отправляем код на родительское окно для обмена на токены
             if (window.opener) {
-                window.opener.postMessage({ type: 'sj_auth_success', code }, '*');
+                if (state === 'hh_auth') {
+                    window.opener.postMessage({ type: 'hh_auth_success', code }, '*');
+                } else if (state === 'superjob_auth') {
+                    window.opener.postMessage({ type: 'sj_auth_success', code }, '*');
+                }
                 messageEl.textContent = '✅ Готово! Можно закрыть это окно.';
                 setTimeout(() => window.close(), 1000);
             } else {
