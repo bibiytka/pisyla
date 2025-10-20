@@ -899,7 +899,7 @@ MAIN_HTML = '''
                     </tr>
                 </thead>
                 <tbody id="vacancyTableBody">
-                    <tr><td colspan="6" class="no-results">Нажмите "Найти вакансии"</td></tr>
+                    <tr><td colspan="5" class="loader">Нажмите "Найти вакансии"</td></tr>
                 </tbody>
             </table>
 
@@ -1322,7 +1322,7 @@ MAIN_HTML = '''
             currentQuery = document.getElementById('query').value.trim() || 'склад';
             
             const tbody = document.getElementById('vacancyTableBody');
-            tbody.innerHTML = ''; // Очищаем таблицу при новом поиске
+            tbody.innerHTML = '<tr><td colspan="5" class="loader"><div class="spinner"></div>Поиск...</td></tr>';
             
             document.getElementById('stats').style.display = 'none';
             document.getElementById('currentSourceBadge').textContent = currentSource === 'hh' ? 'HH.ru' : 'SuperJob';
@@ -1347,7 +1347,7 @@ MAIN_HTML = '''
             try {
                 const params = new URLSearchParams({
                     text: currentQuery,
-                    per_page: 20, // Загружаем по 20 вакансий
+                    per_page: 100,
                     page: currentPage,
                     order_by: 'publication_time'
                 });
@@ -1374,7 +1374,7 @@ MAIN_HTML = '''
                 
                 const data = await response.json();
                 totalFound = data.found;
-                hasMore = currentPage < data.pages - 1; // Убираем ограничение на 19 страниц
+                hasMore = currentPage < data.pages - 1 && currentPage < 19;
 
                 const tbody = document.getElementById('vacancyTableBody');
                 if (currentPage === 0) tbody.innerHTML = '';
@@ -1520,7 +1520,7 @@ MAIN_HTML = '''
 
             for (const cityId of citiesToSearch) {
                 const params = new URLSearchParams({
-                    keyword: currentQuery, count: 20, page: currentPage, // Загружаем по 20 вакансий
+                    keyword: currentQuery, count: 100, page: currentPage,
                     order_field: 'date', order_direction: 'desc'
                 });
 
