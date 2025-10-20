@@ -75,15 +75,17 @@ def get_sj_tokens():
         return {'error': 'Missing parameters'}, 400
 
     token_url = "https://api.superjob.ru/2.0/oauth2/access_token/"
-    params = {
+    payload = {
         'code': code,
         'redirect_uri': redirect_uri,
         'client_id': client_id,
-        'client_secret': client_secret
+        'client_secret': client_secret,
+        'grant_type': 'authorization_code' # Добавляем grant_type
     }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
     try:
-        response = requests.get(token_url, params=params, timeout=30)
+        response = requests.post(token_url, data=payload, headers=headers, timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -753,7 +755,7 @@ MAIN_HTML = '''
         <h1>🏭 Вакансии линейного персонала</h1>
         <p class="subtitle">Грузчики • Кладовщики • Комплектовщики • Упаковщики • Разнорабочие</p>
 
-        <div class="auth-status logged-out" id="sjAuthStatus" style="display: none;">
+        <div class="auth-status logged-out" id="sjAuthStatus">
             <div class="auth-info">
                 <h3 id="sjAuthTitle">🟠 SuperJob: Не авторизован</h3>
                 <p id="sjAuthText">Для поиска вакансий SuperJob требуется авторизация.</p>
@@ -1224,10 +1226,6 @@ MAIN_HTML = '''
             document.querySelector(`label[for="source${source === 'hh' ? 'HH' : 'SJ'}"]`).classList.add('active');
             
             document.getElementById('exclusionBlock').style.display = source === 'hh' ? 'block' : 'none';
-
-            // Control visibility of auth status divs
-            document.getElementById('hhAuthStatus').style.display = source === 'hh' ? 'flex' : 'none';
-            document.getElementById('sjAuthStatus').style.display = source === 'superjob' ? 'flex' : 'none';
             
             // Set default city for the new source
             const defaultId = currentSource === 'hh' ? 2 : 4;
@@ -1506,7 +1504,7 @@ MAIN_HTML = '''
                 `;
                 isLoading = false; hasMore = false;
                 document.getElementById('loadingIndicator').style.display = 'none';
-                updateAuthStatus('superjob');
+                updateAuthStatus();
                 return;
             }
             
