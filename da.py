@@ -1346,8 +1346,8 @@ MAIN_HTML = '''
             
             try {
                 const params = new URLSearchParams({
-                    text: currentQuery,
-                    per_page: 100,
+                    text: currentQuery, # Ищем по тексту из поля ввода
+                    per_page: 20,      # Загружаем по 20 вакансий за раз
                     page: currentPage,
                     order_by: 'publication_time'
                 });
@@ -1685,11 +1685,13 @@ MAIN_HTML = '''
         }
 
         window.onload = () => {
-            // Set initial default city
-            const defaultId = currentSource === 'hh' ? 2 : 4;
-            currentCities = [defaultId];
-            
-            loadCities();
+            // Определяем начальный источник на основе выбранного радио-баттона
+            const initialSourceRadio = document.querySelector('input[name="source"]:checked');
+            currentSource = initialSourceRadio ? initialSourceRadio.value : 'hh'; // По умолчанию HH.ru
+
+            // Инициализируем UI и города для выбранного источника
+            switchSource(currentSource);
+            // loadCities() вызывается внутри switchSource, поэтому здесь не нужно
             updateAuthStatus('all'); // Обновляем статус авторизации при загрузке страницы
             
             document.getElementById('exclusionInput').addEventListener('keypress', (e) => {
