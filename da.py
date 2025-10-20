@@ -16,6 +16,10 @@ def favicon():
 SUPERJOB_APP_ID = "4014"
 SUPERJOB_SECRET_KEY = "v3.r.138979256.3b5b15795a107a49a55e7f4e5eed1857dfe78cde.dda83a292af5754f027da2f0c96152b9b34f0dee"
 
+HH_CLIENT_ID = "OSG86UKP38OI11J3LN443EN7TU5NBIHVO9ACN312JO9O871KF3UNMRMHCJHF8AR5"
+HH_CLIENT_SECRET = "LI36ECQCQNAHR9QV9U9MMPI1B2N9EK4I90QCA3ER02ADL6JQ5LPHBD2L6265M27R"
+HH_REDIRECT_URI = "https://pisyla.onrender.com/hh_callback"
+
 # ============ ПРОКСИ ДЛЯ SUPERJOB API ============
 @app.route('/proxy')
 def proxy():
@@ -52,6 +56,10 @@ def proxy():
 # ============ OAUTH CALLBACK ============
 @app.route('/callback')
 def callback():
+    return render_template_string(CALLBACK_HTML)
+
+@app.route('/hh_callback')
+def hh_callback():
     return render_template_string(CALLBACK_HTML)
 
 # ============ OAUTH TOKEN EXCHANGE ============
@@ -105,6 +113,58 @@ def refresh_sj_token():
         return response.json()
     except requests.exceptions.RequestException as e:
         print(f"Error refreshing SJ token: {e}")
+        return {'error': str(e)}, 500
+
+@app.route('/get_hh_tokens', methods=['POST'])
+def get_hh_tokens():
+    data = request.get_json()
+    code = data.get('code')
+    redirect_uri = data.get('redirect_uri')
+
+    if not all([code, redirect_uri]):
+        return {'error': 'Missing parameters'}, 400
+
+    token_url = "https://api.hh.ru/token"
+    payload = {
+        'grant_type': 'authorization_code',
+        'client_id': HH_CLIENT_ID,
+        'client_secret': HH_CLIENT_SECRET,
+        'code': code,
+        'redirect_uri': redirect_uri
+    }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+
+    try:
+        response = requests.post(token_url, data=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error getting HH tokens: {e}")
+        return {'error': str(e)}, 500
+
+@app.route('/refresh_hh_token', methods=['POST'])
+def refresh_hh_token():
+    data = request.get_json()
+    refresh_token = data.get('refresh_token')
+
+    if not refresh_token:
+        return {'error': 'Missing parameters'}, 400
+
+    refresh_url = "https://api.hh.ru/token"
+    payload = {
+        'grant_type': 'refresh_token',
+        'client_id': HH_CLIENT_ID,
+        'client_secret': HH_CLIENT_SECRET,
+        'refresh_token': refresh_token
+    }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+
+    try:
+        response = requests.post(refresh_url, data=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error refreshing HH token: {e}")
         return {'error': str(e)}, 500
 
 # ============ ГЛАВНАЯ СТРАНИЦА ============
@@ -689,14 +749,25 @@ MAIN_HTML = '''
         <h1>🏭 Вакансии линейного персонала</h1>
         <p class="subtitle">Грузчики • Кладовщики • Комплектовщики • Упаковщики • Разнорабочие</p>
 
-        <div class="auth-status logged-out" id="authStatus">
+        <div class="auth-status logged-out" id="sjAuthStatus">
             <div class="auth-info">
-                <h3 id="authTitle">🟠 SuperJob: Не авторизован</h3>
-                <p id="authText">Для поиска вакансий SuperJob требуется авторизация.</p>
+                <h3 id="sjAuthTitle">🟠 SuperJob: Не авторизован</h3>
+                <p id="sjAuthText">Для поиска вакансий SuperJob требуется авторизация.</p>
             </div>
             <div class="auth-actions">
-                <button onclick="authorizeSuperJob()" id="btnAuthorize">Войти через SuperJob</button>
-                <button onclick="logout()" id="btnLogout" style="display: none;">Выйти</button>
+                <button onclick="authorizeSuperJob()" id="btnSjAuthorize">Войти через SuperJob</button>
+                <button onclick="logout('superjob')" id="btnSjLogout" style="display: none;">Выйти</button>
+            </div>
+        </div>
+
+        <div class="auth-status logged-out" id="hhAuthStatus">
+            <div class="auth-info">
+                <h3 id="hhAuthTitle">🔵 HH.ru: Не авторизован</h3>
+                <p id="hhAuthText">Для получения контактов HH.ru требуется авторизация.</p>
+            </div>
+            <div class="auth-actions">
+                <button onclick="authorizeHH()" id="btnHhAuthorize">Войти через HH.ru</button>
+                <button onclick="logout('hh')" id="btnHhLogout" style="display: none;">Выйти</button>
             </div>
         </div>
 
@@ -845,10 +916,19 @@ MAIN_HTML = '''
         const SUPERJOB_SECRET_KEY = 'v3.r.138979256.3b5b15795a107a49a55e7f4e5eed1857dfe78cde.dda83a292af5754f027da2f0c96152b9b34f0dee'; // Ваш secret_key
         const SUPERJOB_REDIRECT_URI = 'https://pisyla.onrender.com/callback';
 
+        const HH_CLIENT_ID = 'OSG86UKP38OI11J3LN443EN7TU5NBIHVO9ACN312JO9O871KF3UNMRMHCJHF8AR5';
+        const HH_CLIENT_SECRET = 'LI36ECQCQNAHR9QV9U9MMPI1B2N9EK4I90QCA3ER02ADL6JQ5LPHBD2L6265M27R';
+        const HH_REDIRECT_URI = 'https://pisyla.onrender.com/hh_callback';
+
         let sjAccessToken = localStorage.getItem('sj_access_token');
         let sjRefreshToken = localStorage.getItem('sj_refresh_token');
         let sjExpiresIn = localStorage.getItem('sj_expires_in');
         let sjAuthWindow = null;
+
+        let hhAccessToken = localStorage.getItem('hh_access_token');
+        let hhRefreshToken = localStorage.getItem('hh_refresh_token');
+        let hhExpiresIn = localStorage.getItem('hh_expires_in');
+        let hhAuthWindow = null;
 
         let currentPage = 0;
         let isLoading = false;
@@ -875,16 +955,29 @@ MAIN_HTML = '''
 
         let currentCities = [];
 
-        function logout() {
-            if (confirm('Вы уверены, что хотите выйти из SuperJob?')) {
-                localStorage.removeItem('sj_access_token');
-                localStorage.removeItem('sj_refresh_token');
-                localStorage.removeItem('sj_expires_in');
-                sjAccessToken = null;
-                sjRefreshToken = null;
-                sjExpiresIn = null;
-                updateAuthStatus();
-                alert('Вы вышли из SuperJob. Перезагрузите страницу для повторной авторизации.');
+        function logout(source) {
+            if (source === 'superjob') {
+                if (confirm('Вы уверены, что хотите выйти из SuperJob?')) {
+                    localStorage.removeItem('sj_access_token');
+                    localStorage.removeItem('sj_refresh_token');
+                    localStorage.removeItem('sj_expires_in');
+                    sjAccessToken = null;
+                    sjRefreshToken = null;
+                    sjExpiresIn = null;
+                    updateAuthStatus('superjob');
+                    alert('Вы вышли из SuperJob. Перезагрузите страницу для повторной авторизации.');
+                }
+            } else if (source === 'hh') {
+                if (confirm('Вы уверены, что хотите выйти из HH.ru?')) {
+                    localStorage.removeItem('hh_access_token');
+                    localStorage.removeItem('hh_refresh_token');
+                    localStorage.removeItem('hh_expires_in');
+                    hhAccessToken = null;
+                    hhRefreshToken = null;
+                    hhExpiresIn = null;
+                    updateAuthStatus('hh');
+                    alert('Вы вышли из HH.ru. Перезагрузите страницу для повторной авторизации.');
+                }
             }
         }
 
@@ -893,7 +986,12 @@ MAIN_HTML = '''
             sjAuthWindow = window.open(authUrl, '_blank', 'width=600,height=700');
         }
 
-        async function getTokens(code) {
+        function authorizeHH() {
+            const authUrl = `https://hh.ru/oauth/authorize?response_type=code&client_id=${HH_CLIENT_ID}&redirect_uri=${encodeURIComponent(HH_REDIRECT_URI)}&state=hh_auth`;
+            hhAuthWindow = window.open(authUrl, '_blank', 'width=600,height=700');
+        }
+
+        async function getSjTokens(code) {
             try {
                 const response = await fetch('/get_sj_tokens', {
                     method: 'POST',
@@ -916,16 +1014,16 @@ MAIN_HTML = '''
                 localStorage.setItem('sj_refresh_token', sjRefreshToken);
                 localStorage.setItem('sj_expires_in', sjExpiresIn);
                 
-                updateAuthStatus();
+                updateAuthStatus('superjob');
                 return true;
             } catch (error) {
-                console.error('Ошибка при получении токенов:', error);
+                console.error('Ошибка при получении токенов SuperJob:', error);
                 alert('Ошибка авторизации SuperJob. Пожалуйста, попробуйте снова.');
                 return false;
             }
         }
 
-        async function refreshAccessToken() {
+        async function refreshSjToken() {
             if (!sjRefreshToken) return false;
             try {
                 const response = await fetch('/refresh_sj_token', {
@@ -948,36 +1046,122 @@ MAIN_HTML = '''
                 localStorage.setItem('sj_refresh_token', sjRefreshToken);
                 localStorage.setItem('sj_expires_in', sjExpiresIn);
                 
-                updateAuthStatus();
+                updateAuthStatus('superjob');
                 return true;
             } catch (error) {
-                console.error('Ошибка при обновлении токена:', error);
-                logout(); // Если не удалось обновить, выходим
+                console.error('Ошибка при обновлении токена SuperJob:', error);
+                logout('superjob'); // Если не удалось обновить, выходим
                 return false;
             }
         }
 
-        function updateAuthStatus() {
-            const authStatusDiv = document.getElementById('authStatus');
-            const authTitle = document.getElementById('authTitle');
-            const authText = document.getElementById('authText');
-            const btnAuthorize = document.getElementById('btnAuthorize');
-            const btnLogout = document.getElementById('btnLogout');
+        async function getHhTokens(code) {
+            try {
+                const response = await fetch('/get_hh_tokens', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code: code,
+                        redirect_uri: HH_REDIRECT_URI
+                    })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                
+                hhAccessToken = data.access_token;
+                hhRefreshToken = data.refresh_token;
+                hhExpiresIn = Date.now() + (data.expires_in * 1000);
+                
+                localStorage.setItem('hh_access_token', hhAccessToken);
+                localStorage.setItem('hh_refresh_token', hhRefreshToken);
+                localStorage.setItem('hh_expires_in', hhExpiresIn);
+                
+                updateAuthStatus('hh');
+                return true;
+            } catch (error) {
+                console.error('Ошибка при получении токенов HH.ru:', error);
+                alert('Ошибка авторизации HH.ru. Пожалуйста, попробуйте снова.');
+                return false;
+            }
+        }
 
-            if (sjAccessToken && sjExpiresIn && Date.now() < parseInt(sjExpiresIn)) {
-                authStatusDiv.classList.remove('logged-out');
-                authStatusDiv.style.background = 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'; // Зеленый
-                authTitle.textContent = '✅ SuperJob: Авторизован';
-                authText.textContent = `Токен действителен до: ${new Date(parseInt(sjExpiresIn)).toLocaleTimeString()} ${new Date(parseInt(sjExpiresIn)).toLocaleDateString()}`;
-                btnAuthorize.style.display = 'none';
-                btnLogout.style.display = 'block';
-            } else {
-                authStatusDiv.classList.add('logged-out');
-                authStatusDiv.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)'; // Серый
-                authTitle.textContent = '🟠 SuperJob: Не авторизован';
-                authText.textContent = 'Для поиска вакансий SuperJob требуется авторизация.';
-                btnAuthorize.style.display = 'block';
-                btnLogout.style.display = 'none';
+        async function refreshHhToken() {
+            if (!hhRefreshToken) return false;
+            try {
+                const response = await fetch('/refresh_hh_token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        refresh_token: hhRefreshToken
+                    })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+
+                hhAccessToken = data.access_token;
+                hhRefreshToken = data.refresh_token;
+                hhExpiresIn = Date.now() + (data.expires_in * 1000);
+
+                localStorage.setItem('hh_access_token', hhAccessToken);
+                localStorage.setItem('hh_refresh_token', hhRefreshToken);
+                localStorage.setItem('hh_expires_in', hhExpiresIn);
+                
+                updateAuthStatus('hh');
+                return true;
+            } catch (error) {
+                console.error('Ошибка при обновлении токена HH.ru:', error);
+                logout('hh'); // Если не удалось обновить, выходим
+                return false;
+            }
+        }
+
+        function updateAuthStatus(source = 'all') {
+            if (source === 'superjob' || source === 'all') {
+                const authStatusDiv = document.getElementById('sjAuthStatus');
+                const authTitle = document.getElementById('sjAuthTitle');
+                const authText = document.getElementById('sjAuthText');
+                const btnAuthorize = document.getElementById('btnSjAuthorize');
+                const btnLogout = document.getElementById('btnSjLogout');
+
+                if (sjAccessToken && sjExpiresIn && Date.now() < parseInt(sjExpiresIn)) {
+                    authStatusDiv.classList.remove('logged-out');
+                    authStatusDiv.style.background = 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'; // Зеленый
+                    authTitle.textContent = '✅ SuperJob: Авторизован';
+                    authText.textContent = `Токен действителен до: ${new Date(parseInt(sjExpiresIn)).toLocaleTimeString()} ${new Date(parseInt(sjExpiresIn)).toLocaleDateString()}`;
+                    btnAuthorize.style.display = 'none';
+                    btnLogout.style.display = 'block';
+                } else {
+                    authStatusDiv.classList.add('logged-out');
+                    authStatusDiv.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)'; // Серый
+                    authTitle.textContent = '🟠 SuperJob: Не авторизован';
+                    authText.textContent = 'Для поиска вакансий SuperJob требуется авторизация.';
+                    btnAuthorize.style.display = 'block';
+                    btnLogout.style.display = 'none';
+                }
+            }
+
+            if (source === 'hh' || source === 'all') {
+                const authStatusDiv = document.getElementById('hhAuthStatus');
+                const authTitle = document.getElementById('hhAuthTitle');
+                const authText = document.getElementById('hhAuthText');
+                const btnAuthorize = document.getElementById('btnHhAuthorize');
+                const btnLogout = document.getElementById('btnHhLogout');
+
+                if (hhAccessToken && hhExpiresIn && Date.now() < parseInt(hhExpiresIn)) {
+                    authStatusDiv.classList.remove('logged-out');
+                    authStatusDiv.style.background = 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)'; // Зеленый
+                    authTitle.textContent = '✅ HH.ru: Авторизован';
+                    authText.textContent = `Токен действителен до: ${new Date(parseInt(hhExpiresIn)).toLocaleTimeString()} ${new Date(parseInt(hhExpiresIn)).toLocaleDateString()}`;
+                    btnAuthorize.style.display = 'none';
+                    btnLogout.style.display = 'block';
+                } else {
+                    authStatusDiv.classList.add('logged-out');
+                    authStatusDiv.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)'; // Серый
+                    authTitle.textContent = '🔵 HH.ru: Не авторизован';
+                    authText.textContent = 'Для получения контактов HH.ru требуется авторизация.';
+                    btnAuthorize.style.display = 'block';
+                    btnLogout.style.display = 'none';
+                }
             }
         }
 
@@ -985,7 +1169,10 @@ MAIN_HTML = '''
             if (event.origin !== window.location.origin) return;
             if (event.data.type === 'sj_auth_success' && event.data.code) {
                 if (sjAuthWindow) sjAuthWindow.close();
-                await getTokens(event.data.code);
+                await getSjTokens(event.data.code);
+            } else if (event.data.type === 'hh_auth_success' && event.data.code) {
+                if (hhAuthWindow) hhAuthWindow.close();
+                await getHhTokens(event.data.code);
             }
         });
 
@@ -1188,35 +1375,55 @@ MAIN_HTML = '''
                     const companiesAdded = new Set();
                     const oneVacancyPerCompany = document.getElementById('oneVacancyPerCompany')?.checked;
 
-                    data.items.forEach(v => {
-                        const companyName = v.employer?.name || 'Не указано';
+                    for (const basicVacancy of data.items) {
+                        const companyName = basicVacancy.employer?.name || 'Не указано';
 
                         if (oneVacancyPerCompany && companiesAdded.has(companyName)) {
                             excludedCount++;
-                            return;
+                            continue;
                         }
 
-                        const fullText = `${v.name} ${companyName} ${v.snippet?.requirement || ''}`;
+                        const fullText = `${basicVacancy.name} ${companyName} ${basicVacancy.snippet?.requirement || ''}`;
                         if (isExcluded(fullText)) {
                             excludedCount++;
-                            return;
+                            continue;
                         }
 
-                        const salary = v.salary 
-                            ? `${v.salary.from ? v.salary.from.toLocaleString() : ''}${v.salary.to ? ' – ' + v.salary.to.toLocaleString() : ''} ${v.salary.currency || ''}`.trim()
+                        let detailedVacancy = basicVacancy;
+                        // Если есть HH access token, делаем запрос за детальной информацией
+                        if (hhAccessToken && hhExpiresIn && Date.now() < parseInt(hhExpiresIn)) {
+                            try {
+                                const detailResponse = await fetch(`https://api.hh.ru/vacancies/${basicVacancy.id}`, {
+                                    headers: {
+                                        'Authorization': `Bearer ${hhAccessToken}`,
+                                        'HH-User-Agent': 'VacancyParser/1.0 (my-app-feedback@example.com)' // Замените на ваш email
+                                    }
+                                });
+                                if (detailResponse.ok) {
+                                    detailedVacancy = await detailResponse.json();
+                                } else {
+                                    console.warn(`Failed to fetch detailed HH vacancy ${basicVacancy.id}: ${detailResponse.status}`);
+                                }
+                            } catch (detailError) {
+                                console.error(`Error fetching detailed HH vacancy ${basicVacancy.id}:`, detailError);
+                            }
+                        }
+
+                        const salary = detailedVacancy.salary 
+                            ? `${detailedVacancy.salary.from ? detailedVacancy.salary.from.toLocaleString() : ''}${detailedVacancy.salary.to ? ' – ' + detailedVacancy.salary.to.toLocaleString() : ''} ${detailedVacancy.salary.currency || ''}`.trim()
                             : "Не указана";
 
-                        if (v.salary) withSalaryCount++;
+                        if (detailedVacancy.salary) withSalaryCount++;
                         loadedCount++;
 
                         // Форматирование контактов
                         let contactsHTML = '<span class="no-contacts">—</span>';
-                        if (v.contacts) {
+                        if (detailedVacancy.contacts) {
                             let contactParts = [];
                             
                             // Телефоны
-                            if (v.contacts.phones && v.contacts.phones.length > 0) {
-                                const phones = v.contacts.phones.map(p => {
+                            if (detailedVacancy.contacts.phones && detailedVacancy.contacts.phones.length > 0) {
+                                const phones = detailedVacancy.contacts.phones.map(p => {
                                     let phoneStr = p.country ? `+${p.country} ` : '';
                                     phoneStr += p.city ? `(${p.city}) ` : '';
                                     phoneStr += p.number || '';
@@ -1227,13 +1434,13 @@ MAIN_HTML = '''
                             }
                             
                             // Email
-                            if (v.contacts.email) {
-                                contactParts.push(`<span class="contact-email">${v.contacts.email}</span>`);
+                            if (detailedVacancy.contacts.email) {
+                                contactParts.push(`<span class="contact-email">${detailedVacancy.contacts.email}</span>`);
                             }
                             
                             // Имя контакта
-                            if (v.contacts.name) {
-                                contactParts.push(`<span class="contact-name">${v.contacts.name}</span>`);
+                            if (detailedVacancy.contacts.name) {
+                                contactParts.push(`<span class="contact-name">${detailedVacancy.contacts.name}</span>`);
                             }
                             
                             if (contactParts.length > 0) {
@@ -1241,29 +1448,26 @@ MAIN_HTML = '''
                             }
                         }
 
-                        if (v.salary) withSalaryCount++;
-                        loadedCount++;
-
                         const row = document.createElement("tr");
                         row.innerHTML = `
                             <td class="vacancy-title">
-                                ${v.name}
-                                ${isNew(v.published_at) ? '<span class="badge-new">NEW</span>' : ''}
+                                ${detailedVacancy.name}
+                                ${isNew(detailedVacancy.published_at) ? '<span class="badge-new">NEW</span>' : ''}
                                 <span class="badge-source hh">HH</span>
                             </td>
                             <td class="company-name">${companyName}</td>
                             <td class="salary">${salary}</td>
-                            <td class="location">${v.area?.name || 'Не указано'}</td>
-                            <td class="date">${formatDate(v.published_at)}</td>
+                            <td class="location">${detailedVacancy.area?.name || 'Не указано'}</td>
+                            <td class="date">${formatDate(detailedVacancy.published_at)}</td>
                             <td>${contactsHTML}</td>
                         `;
-                        row.onclick = () => window.open(`https://hh.ru/vacancy/${v.id}`, '_blank');
+                        row.onclick = () => window.open(`https://hh.ru/vacancy/${detailedVacancy.id}`, '_blank');
                         tbody.appendChild(row);
 
                         if (oneVacancyPerCompany) {
                             companiesAdded.add(companyName);
                         }
-                    });
+                    }
 
                     updateStats();
                     currentPage++;
@@ -1478,7 +1682,7 @@ MAIN_HTML = '''
             currentCities = [defaultId];
             
             loadCities();
-            updateAuthStatus(); // Обновляем статус авторизации при загрузке страницы
+            updateAuthStatus('all'); // Обновляем статус авторизации при загрузке страницы
             
             document.getElementById('exclusionInput').addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') addExclusion();
