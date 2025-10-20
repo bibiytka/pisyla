@@ -814,6 +814,16 @@ MAIN_HTML = '''
                 </div>
             </div>
 
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label for="sortOrder">Сортировка:</label>
+                    <select id="sortOrder" onchange="updateSortOrder()">
+                        <option value="publication_time">По дате публикации</option>
+                        <option value="relevance">По релевантности</option>
+                    </select>
+                </div>
+            </div>
+
             <div id="exclusionBlock" class="filter-row">
                 <div class="filter-group" style="flex: 1 1 100%;">
                     <label for="exclusionInput">
@@ -825,6 +835,19 @@ MAIN_HTML = '''
                     <div class="exclusion-tags" id="exclusionTags">
                         <small style="color: #7f8c8d;">Нет исключений</small>
                     </div>
+                </div>
+            </div>
+
+            <div class="filter-row">
+                <div class="filter-group" style="flex: 1 1 100%;">
+                    <label for="keywordFilterInput">
+                        Фильтр по ключевому слову:
+                        <small>Введите слово, например "грузчик". Вакансии будут показаны, если содержат это слово, но не содержат других слов, заканчивающихся на "ик" (кроме введенного).</small>
+                    </label>
+                    <input type="text" id="keywordFilterInput" placeholder="Введите ключевое слово">
+                    <label style="margin-top: 10px;">
+                        <input type="checkbox" id="excludeSuffixFilter"> Активировать фильтр "без других -ик"
+                    </label>
                 </div>
             </div>
 
@@ -948,6 +971,9 @@ MAIN_HTML = '''
         let currentQuery = '';
         let currentSource = 'hh';
         let exclusionWords = [];
+        let currentSortOrder = 'publication_time'; // Default sort order for HH.ru
+        let keywordFilterWord = '';
+        let excludeSuffixActive = false;
 
         const citiesHH = {
             1: 'Москва', 2: 'Санкт-Петербург', 3: 'Екатеринбург',
@@ -1284,6 +1310,11 @@ MAIN_HTML = '''
             document.getElementById('selectedCitiesText').textContent = text;
         }
 
+        function updateSortOrder() {
+            currentSortOrder = document.getElementById('sortOrder').value;
+            startNewSearch(); // Перезапускаем поиск при изменении сортировки
+        }
+
         function addExclusion() {
             const word = document.getElementById('exclusionInput').value.trim().toLowerCase();
             if (word && !exclusionWords.includes(word)) {
@@ -1315,6 +1346,26 @@ MAIN_HTML = '''
             return exclusionWords.some(word => text.toLowerCase().includes(word));
         }
 
+        function isCustomFiltered(text, keyword, excludeSuffix) {
+            if (!excludeSuffix || !keyword) return false; // Фильтр не активен или нет ключевого слова
+
+            const keywordRegex = new RegExp(`\\b${keyword}\\b`, 'i');
+            if (!keywordRegex.test(text)) {
+                return true; // Исключаем, если ключевого слова нет
+            }
+
+            // Проверяем наличие других слов, заканчивающихся на "ик", кроме ключевого слова
+            const suffixRegex = /\b\w*ик\b/gi;
+            let match;
+            while ((match = suffixRegex.exec(text)) !== null) {
+                const foundWord = match[0].toLowerCase();
+                if (foundWord !== keyword) {
+                    return true; // Исключаем, если найдено другое слово на "ик"
+                }
+            }
+            return false; // Не исключаем, если все условия выполнены
+        }
+
         function startNewSearch() {
             currentPage = 0;
             hasMore = true;
@@ -1324,6 +1375,8 @@ MAIN_HTML = '''
             totalFound = 0;
             
             currentQuery = document.getElementById('query').value.trim() || 'склад';
+            keywordFilterWord = document.getElementById('keywordFilterInput').value.trim().toLowerCase();
+            excludeSuffixActive = document.getElementById('excludeSuffixFilter').checked;
             
             const tbody = document.getElementById('vacancyTableBody');
             tbody.innerHTML = ''; // Очищаем таблицу при новом поиске
@@ -1351,9 +1404,9 @@ MAIN_HTML = '''
             try {
                 const params = new URLSearchParams({
                     text: currentQuery,
-                    per_page: 20, // Загружаем по 20 вакансий
+                    per_page: 10, // Загружаем по 10 вакансий
                     page: currentPage,
-                    order_by: 'publication_time'
+                    order_by: currentSortOrder // Используем выбранный порядок сортировки
                 });
 
                 currentCities.forEach(city => params.append('area', city));
@@ -1395,8 +1448,8 @@ MAIN_HTML = '''
                             continue;
                         }
 
-                        const fullText = `${basicVacancy.name} ${companyName} ${basicVacancy.snippet?.requirement || ''}`;
-                        if (isExcluded(fullText)) {
+                        const fullText = `${basicVacancy.name} ${companyName} ${basicVacancy.snippet?.requirement || ''} ${basicVacancy.snippet?.responsibility || ''}`.toLowerCase();
+                        if (isExcluded(fullText) || isCustomFiltered(fullText, keywordFilterWord, excludeSuffixActive)) {
                             excludedCount++;
                             continue;
                         }
@@ -1525,9 +1578,17 @@ MAIN_HTML = '''
 
             for (const cityId of citiesToSearch) {
                 const params = new URLSearchParams({
-                    keyword: currentQuery, count: 20, page: currentPage, // Загружаем по 20 вакансий
-                    order_field: 'date', order_direction: 'desc'
+                    keyword: currentQuery, count: 20, page: currentPage // Загружаем по 20 вакансий
                 });
+
+                // Применяем сортировку для SuperJob
+                if (currentSortOrder === 'publication_time') {
+                    params.append('order_field', 'date');
+                    params.append('order_direction', 'desc');
+                } else if (currentSortOrder === 'relevance') {
+                    params.append('order_field', 'relevance');
+                    params.append('order_direction', 'desc'); // SuperJob по умолчанию сортирует по релевантности, но явно укажем
+                }
 
                 params.append('t', cityId); // Append only one city ID per request
 
@@ -1575,6 +1636,12 @@ MAIN_HTML = '''
                         const companyName = v.firm_name || '—';
 
                         if (oneVacancyPerCompany && companiesAdded.has(companyName)) {
+                            excludedCount++;
+                            return;
+                        }
+                        
+                        const fullText = `${v.profession} ${companyName} ${v.candidat || ''} ${v.work || ''}`.toLowerCase();
+                        if (isExcluded(fullText) || isCustomFiltered(fullText, keywordFilterWord, excludeSuffixActive)) {
                             excludedCount++;
                             return;
                         }
