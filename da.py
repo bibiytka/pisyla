@@ -1351,7 +1351,7 @@ MAIN_HTML = '''
             try {
                 const params = new URLSearchParams({
                     text: currentQuery,
-                    per_page: 20, // Загружаем по 20 вакансий
+                    per_page: 1, // Устанавливаем количество вакансий за раз на 1 для проверки
                     page: currentPage,
                     order_by: 'publication_time'
                 });
@@ -1405,7 +1405,7 @@ MAIN_HTML = '''
                         // Если есть HH access token, делаем запрос за детальной информацией
                         if (hhAccessToken && hhExpiresIn && Date.now() < parseInt(hhExpiresIn)) {
                             try {
-                                await delay(500); // Добавляем задержку в 500 мс перед каждым детальным запросом
+                                await delay(1000); // Увеличиваем задержку до 1000 мс перед каждым детальным запросом
                                 const detailResponse = await fetch(`https://api.hh.ru/vacancies/${basicVacancy.id}`, {
                                     headers: {
                                         'Authorization': `Bearer ${hhAccessToken}`,
