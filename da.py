@@ -1402,7 +1402,7 @@ MAIN_HTML = '''
                                 const detailResponse = await fetch(`https://api.hh.ru/vacancies/${basicVacancy.id}`, {
                                     headers: {
                                         'Authorization': `Bearer ${hhAccessToken}`,
-                                        'HH-User-Agent': 'VacancyParser/1.0 (your-valid-email@example.com)' // Замените на ваш email
+                                        'HH-User-Agent': 'VacancyParser/1.0 (orlov11121@mail.ru)' // Замените на ваш email
                                     }
                                 });
                                 if (detailResponse.ok) {
