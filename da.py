@@ -1495,7 +1495,7 @@ MAIN_HTML = '''
             isLoading = true;
             document.getElementById('loadingIndicator').style.display = 'block';
             
-            if (!sjAccessToken || (sjExpiresIn && Date.now() >= parseInt(sjExpiresIn) && !(await refreshAccessToken()))) {
+            if (!sjAccessToken || (sjExpiresIn && Date.now() >= parseInt(sjExpiresIn) && !(await refreshSjToken()))) {
                 document.getElementById('vacancyTableBody').innerHTML = `
                     <tr><td colspan="6" style="text-align:center; padding: 40px;">
                         <h3>⚠️ SuperJob: Требуется авторизация</h3>
