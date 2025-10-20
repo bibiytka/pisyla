@@ -16,11 +16,29 @@ def favicon():
 SUPERJOB_APP_ID = "4014"
 SUPERJOB_SECRET_KEY = "v3.r.138979256.3b5b15795a107a49a55e7f4e5eed1857dfe78cde.dda83a292af5754f027da2f0c96152b9b34f0dee"
 
+import time, requests # Добавляем import time
+
 HH_CLIENT_ID = "OSG86UKP38OI11J3LN443EN7TU5NBIHVO9ACN312JO9O871KF3UNMRMHCJHF8AR5"
 HH_CLIENT_SECRET = "LI36ECQCQNAHR9QV9U9MMPI1B2N9EK4I90QCA3ER02ADL6JQ5LPHBD2L6265M27R"
 HH_REDIRECT_URI = "https://pisyla.onrender.com/hh_callback"
+HH_TOKEN_URL = "https://hh.ru/oauth/token" # Новый endpoint для HH OAuth
 
 # ============ ПРОКСИ ДЛЯ SUPERJOB API ============
+UA = "VacancyApp/1.0 (orlov11121@mail.ru)" # Универсальный User-Agent
+
+def request_with_backoff(method, url, *, headers=None, params=None, data=None, json=None, max_retries=6, timeout=30):
+    headers = headers or {}
+    headers.setdefault('User-Agent', UA)
+    delay = 1
+    for attempt in range(max_retries):
+        resp = requests.request(method, url, headers=headers, params=params, data=data, json=json, timeout=timeout)
+        if resp.status_code != 429:
+            return resp
+        wait = int(resp.headers.get('Retry-After') or delay)
+        time.sleep(wait)
+        delay = min(delay * 2, 60)
+    return resp  # последняя 429
+
 @app.route('/proxy')
 def proxy():
     target_url = request.args.get('url')
@@ -40,7 +58,7 @@ def proxy():
         # Для SuperJob API также требуется X-Api-App-Id
         headers['X-Api-App-Id'] = SUPERJOB_SECRET_KEY
         
-        response = requests.get(target_url, headers=headers, timeout=30)
+        response = request_with_backoff('GET', target_url, headers=headers, timeout=30) # Используем backoff
         
         return Response(
             response.content,
@@ -75,15 +93,16 @@ def get_sj_tokens():
         return {'error': 'Missing parameters'}, 400
 
     token_url = "https://api.superjob.ru/2.0/oauth2/access_token/"
-    params = {
+    payload = { # Используем payload для POST запроса
         'code': code,
         'redirect_uri': redirect_uri,
         'client_id': client_id,
         'client_secret': client_secret
     }
+    headers = {'User-Agent': UA} # Добавляем User-Agent
 
     try:
-        response = requests.get(token_url, params=params, timeout=30)
+        response = request_with_backoff('POST', token_url, data=payload, headers=headers, timeout=30) # Используем backoff и POST
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -101,14 +120,15 @@ def refresh_sj_token():
         return {'error': 'Missing parameters'}, 400
 
     refresh_url = "https://api.superjob.ru/2.0/oauth2/refresh_token/"
-    params = {
+    payload = { # Используем payload для POST запроса
         'refresh_token': refresh_token,
         'client_id': client_id,
         'client_secret': client_secret
     }
+    headers = {'User-Agent': UA} # Добавляем User-Agent
 
     try:
-        response = requests.get(refresh_url, params=params, timeout=30)
+        response = request_with_backoff('POST', refresh_url, data=payload, headers=headers, timeout=30) # Используем backoff и POST
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -124,7 +144,6 @@ def get_hh_tokens():
     if not all([code, redirect_uri]):
         return {'error': 'Missing parameters'}, 400
 
-    token_url = "https://api.hh.ru/token"
     payload = {
         'grant_type': 'authorization_code',
         'client_id': HH_CLIENT_ID,
@@ -132,10 +151,13 @@ def get_hh_tokens():
         'code': code,
         'redirect_uri': redirect_uri
     }
-    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': UA # Добавляем User-Agent
+    }
 
     try:
-        response = requests.post(token_url, data=payload, headers=headers, timeout=30)
+        response = request_with_backoff('POST', HH_TOKEN_URL, data=payload, headers=headers, timeout=30) # Используем backoff и новый endpoint
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -150,17 +172,19 @@ def refresh_hh_token():
     if not refresh_token:
         return {'error': 'Missing parameters'}, 400
 
-    refresh_url = "https://api.hh.ru/token"
     payload = {
         'grant_type': 'refresh_token',
         'client_id': HH_CLIENT_ID,
         'client_secret': HH_CLIENT_SECRET,
         'refresh_token': refresh_token
     }
-    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': UA # Добавляем User-Agent
+    }
 
     try:
-        response = requests.post(refresh_url, data=payload, headers=headers, timeout=30)
+        response = request_with_backoff('POST', HH_TOKEN_URL, data=payload, headers=headers, timeout=30) # Используем backoff и новый endpoint
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -919,9 +943,37 @@ MAIN_HTML = '''
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
+        async function fetchWithBackoff(url, opts = {}, maxRetries = 5) {
+            let delayTime = 1000;
+            for (let i = 0; i <= maxRetries; i++) {
+                const r = await fetch(url, opts);
+                if (r.status !== 429) return r;
+                const ra = parseInt(r.headers.get('Retry-After') || '0', 10);
+                await new Promise(res => setTimeout(res, (ra ? ra * 1000 : delayTime)));
+                delayTime = Math.min(delayTime * 2, 60000);
+            }
+            throw new Error('Rate limited (429)');
+        }
+
         const API_BASE = 'https://api.superjob.ru/2.0';
         const SUPERJOB_CLIENT_ID = '4014'; // Ваш client_id
         const SUPERJOB_SECRET_KEY = 'v3.r.138979256.3b5b15795a107a49a55e7f4e5eed1857dfe78cde.dda83a292af5754f027da2f0c96152b9b34f0dee'; // Ваш secret_key
+        const SUPERJOB_REDIRECT_URI = 'https://pisyla.onrender.com/callback';
+
+        function createQueue(concurrency = 3) {
+            const q = []; let active = 0;
+
+            const run = () => {
+                if (active >= concurrency || q.length === 0) return;
+                const {fn, resolve, reject} = q.shift();
+                active++;
+                fn().then(resolve).catch(reject).finally(() => { active--; run(); });
+            };
+
+            return (fn) => new Promise((resolve, reject) => { q.push({fn, resolve, reject}); run(); });
+        }
+
+        const detailQueue = createQueue(3); // Очередь для детальных запросов HH
         const SUPERJOB_REDIRECT_URI = 'https://pisyla.onrender.com/callback';
 
         const HH_CLIENT_ID = 'OSG86UKP38OI11J3LN443EN7TU5NBIHVO9ACN312JO9O871KF3UNMRMHCJHF8AR5';
@@ -1275,7 +1327,22 @@ MAIN_HTML = '''
 
         function updateCitySelection() {
             const checkboxes = document.querySelectorAll('#cityOptions input:checked');
-            currentCities = Array.from(checkboxes).map(cb => parseInt(cb.value));
+            const newCities = Array.from(checkboxes).map(cb => parseInt(cb.value));
+
+            // Если выбор городов изменился, сбрасываем состояние поиска
+            if (JSON.stringify(newCities) !== JSON.stringify(currentCities)) {
+                currentCities = newCities;
+                currentPage = 0;
+                hasMore = true;
+                loadedCount = 0;
+                withSalaryCount = 0;
+                excludedCount = 0;
+                totalFound = 0;
+                document.getElementById('vacancyTableBody').innerHTML = ''; // Очищаем таблицу
+                document.getElementById('stats').style.display = 'none'; // Скрываем статистику
+                // Не вызываем loadMoreVacancies() здесь, чтобы избежать автоматического поиска при каждом изменении чекбокса.
+                // Пользователь должен нажать "Найти вакансии" для нового поиска.
+            }
             
             const cities = currentSource === 'hh' ? citiesHH : citiesSJ;
             const text = currentCities.length === 0 ? 'Выберите город' :
@@ -1351,7 +1418,7 @@ MAIN_HTML = '''
             try {
                 const params = new URLSearchParams({
                     text: currentQuery,
-                    per_page: 1, // Устанавливаем количество вакансий за раз на 1 для проверки
+                    per_page: 100, // Повышаем количество вакансий за раз до 100 (максимум)
                     page: currentPage,
                     order_by: 'publication_time'
                 });
@@ -1389,13 +1456,19 @@ MAIN_HTML = '''
 
                     for (const basicVacancy of data.items) {
                         const companyName = basicVacancy.employer?.name || 'Не указано';
+                        const employerId = basicVacancy.employer?.id || companyName; // Используем ID, если есть, иначе имя
 
-                        if (oneVacancyPerCompany && companiesAdded.has(companyName)) {
+                        if (oneVacancyPerCompany && companiesAdded.has(employerId)) {
                             excludedCount++;
                             continue;
                         }
 
-                        const fullText = `${basicVacancy.name} ${companyName} ${basicVacancy.snippet?.requirement || ''}`;
+                        const fullText = [
+                            basicVacancy.name,
+                            companyName,
+                            basicVacancy.snippet?.requirement,
+                            basicVacancy.snippet?.responsibility // Добавляем ответственность в текст для исключения
+                        ].filter(Boolean).join(' ');
                         if (isExcluded(fullText)) {
                             excludedCount++;
                             continue;
@@ -1405,20 +1478,44 @@ MAIN_HTML = '''
                         // Если есть HH access token, делаем запрос за детальной информацией
                         if (hhAccessToken && hhExpiresIn && Date.now() < parseInt(hhExpiresIn)) {
                             try {
-                                await delay(1000); // Увеличиваем задержку до 1000 мс перед каждым детальным запросом
-                                const detailResponse = await fetch(`https://api.hh.ru/vacancies/${basicVacancy.id}`, {
+                                // Используем очередь для ограничения параллельных запросов
+                                const detailResponse = await detailQueue(() => fetchWithBackoff(`https://api.hh.ru/vacancies/${basicVacancy.id}`, {
                                     headers: {
                                         'Authorization': `Bearer ${hhAccessToken}`,
                                         'HH-User-Agent': 'VacancyParser/1.0 (orlov11121@mail.ru)' // Замените на ваш email
                                     }
-                                });
+                                }));
                                 if (detailResponse.ok) {
                                     detailedVacancy = await detailResponse.json();
+                                } else if (detailResponse.status === 401) {
+                                    console.warn(`HH token expired for vacancy ${basicVacancy.id}. Attempting to refresh...`);
+                                    if (await refreshHhToken()) {
+                                        // Повторяем запрос после обновления токена
+                                        await delay(1000); // Добавляем задержку перед повторным запросом
+                                        const refreshedDetailResponse = await fetch(`https://api.hh.ru/vacancies/${basicVacancy.id}`, {
+                                            headers: {
+                                                'Authorization': `Bearer ${hhAccessToken}`,
+                                                'HH-User-Agent': 'VacancyParser/1.0 (orlov11121@mail.ru)'
+                                            }
+                                        });
+                                        if (refreshedDetailResponse.ok) {
+                                            detailedVacancy = await refreshedDetailResponse.json();
+                                        } else {
+                                            console.warn(`Failed to fetch detailed HH vacancy ${basicVacancy.id} after refresh: ${refreshedDetailResponse.status}`);
+                                            // Если повторно 401 или другая ошибка, пропускаем контакты
+                                            detailedVacancy.contacts = null;
+                                        }
+                                    } else {
+                                        // Если не удалось обновить токен, пропускаем контакты
+                                        detailedVacancy.contacts = null;
+                                    }
                                 } else {
                                     console.warn(`Failed to fetch detailed HH vacancy ${basicVacancy.id}: ${detailResponse.status}`);
+                                    detailedVacancy.contacts = null; // Пропускаем контакты при других ошибках
                                 }
                             } catch (detailError) {
                                 console.error(`Error fetching detailed HH vacancy ${basicVacancy.id}:`, detailError);
+                                detailedVacancy.contacts = null; // Пропускаем контакты при ошибках сети
                             }
                         }
 
@@ -1669,7 +1766,14 @@ MAIN_HTML = '''
             scrollBtn.classList.toggle('visible', scrollTop > 300);
             
             if (scrollTop + windowHeight >= documentHeight - 500) {
-                if (!isLoading && hasMore) loadMoreVacancies();
+                if (!isLoading && hasMore) {
+                    if (loadedCount >= totalFound) { // Останавливаем автоподгрузку, если все вакансии загружены
+                        console.log('All vacancies loaded. Stopping auto-load.');
+                        hasMore = false;
+                        return;
+                    }
+                    loadMoreVacancies();
+                }
             }
         });
 
@@ -1681,7 +1785,7 @@ MAIN_HTML = '''
             const query = document.getElementById('query').value.trim() || "склад";
             const encoded = encodeURIComponent(query);
             const urls = {
-                hh: `https://spb.hh.ru/search/vacancy?text=${encoded}`,
+                hh: `https://hh.ru/search/vacancy?text=${encoded}${currentCities.length === 1 && currentSource === 'hh' ? `&area=${currentCities[0]}` : ''}`, // Добавляем параметр area для HH
                 avito: `https://www.avito.ru/rossiya/vakansii?q=${encoded}`,
                 superjob: `https://www.superjob.ru/vacancy/search/?keywords=${encoded}`,
                 zarplata: `https://www.zarplata.ru/vacancies?search=${encoded}`
