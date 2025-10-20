@@ -1504,7 +1504,7 @@ MAIN_HTML = '''
                 `;
                 isLoading = false; hasMore = false;
                 document.getElementById('loadingIndicator').style.display = 'none';
-                updateAuthStatus();
+                updateAuthStatus('superjob');
                 return;
             }
             
