@@ -179,11 +179,6 @@ def index():
             client_id: '{SUPERJOB_APP_ID}',
             client_secret: '{SUPERJOB_SECRET_KEY}'
         }}));
-        localStorage.setItem('hh_credentials', JSON.stringify({{
-            client_id: '{HH_CLIENT_ID}',
-            client_secret: '{HH_CLIENT_SECRET}',
-            redirect_uri: '{HH_REDIRECT_URI}'
-        }}));
         '''
     )
     return render_template_string(html)
@@ -1002,15 +997,15 @@ MAIN_HTML = '''
 
         async function getSjTokens(code) {
             try {
-                const params = new URLSearchParams({
-                    code: code,
-                    redirect_uri: SUPERJOB_REDIRECT_URI,
-                    client_id: SUPERJOB_CLIENT_ID,
-                    client_secret: SUPERJOB_SECRET_KEY
-                });
-                const response = await fetch(`/get_sj_tokens?${params.toString()}`, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json' } // Keep Content-Type for consistency, though not strictly needed for GET with params
+                const response = await fetch('/get_sj_tokens', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code: code,
+                        redirect_uri: SUPERJOB_REDIRECT_URI,
+                        client_id: SUPERJOB_CLIENT_ID,
+                        client_secret: SUPERJOB_SECRET_KEY
+                    })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
@@ -1035,14 +1030,14 @@ MAIN_HTML = '''
         async function refreshSjToken() {
             if (!sjRefreshToken) return false;
             try {
-                const params = new URLSearchParams({
-                    refresh_token: sjRefreshToken,
-                    client_id: SUPERJOB_CLIENT_ID,
-                    client_secret: SUPERJOB_SECRET_KEY
-                });
-                const response = await fetch(`/refresh_sj_token?${params.toString()}`, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json' } // Keep Content-Type for consistency
+                const response = await fetch('/refresh_sj_token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        refresh_token: sjRefreshToken,
+                        client_id: SUPERJOB_CLIENT_ID,
+                        client_secret: SUPERJOB_SECRET_KEY
+                    })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
@@ -1229,6 +1224,10 @@ MAIN_HTML = '''
             document.querySelector(`label[for="source${source === 'hh' ? 'HH' : 'SJ'}"]`).classList.add('active');
             
             document.getElementById('exclusionBlock').style.display = source === 'hh' ? 'block' : 'none';
+
+            // Control visibility of auth status divs
+            document.getElementById('hhAuthStatus').style.display = source === 'hh' ? 'flex' : 'none';
+            document.getElementById('sjAuthStatus').style.display = source === 'superjob' ? 'flex' : 'none';
             
             // Set default city for the new source
             const defaultId = currentSource === 'hh' ? 2 : 4;
@@ -1384,18 +1383,18 @@ MAIN_HTML = '''
                     const companiesAdded = new Set();
                     const oneVacancyPerCompany = document.getElementById('oneVacancyPerCompany')?.checked;
 
-                    data.items.forEach(v => {
-                        const companyName = v.employer?.name || 'Не указано';
+                    for (const basicVacancy of data.items) {
+                        const companyName = basicVacancy.employer?.name || 'Не указано';
 
                         if (oneVacancyPerCompany && companiesAdded.has(companyName)) {
                             excludedCount++;
-                            return;
+                            continue;
                         }
 
-                        const fullText = `${v.name} ${companyName} ${v.snippet?.requirement || ''}`;
+                        const fullText = `${basicVacancy.name} ${companyName} ${basicVacancy.snippet?.requirement || ''}`;
                         if (isExcluded(fullText)) {
                             excludedCount++;
-                            return;
+                            continue;
                         }
 
                         let detailedVacancy = basicVacancy;
@@ -1498,7 +1497,7 @@ MAIN_HTML = '''
             isLoading = true;
             document.getElementById('loadingIndicator').style.display = 'block';
             
-            if (!sjAccessToken || (sjExpiresIn && Date.now() >= parseInt(sjExpiresIn) && !(await refreshAccessToken()))) {
+            if (!sjAccessToken || (sjExpiresIn && Date.now() >= parseInt(sjExpiresIn) && !(await refreshSjToken()))) {
                 document.getElementById('vacancyTableBody').innerHTML = `
                     <tr><td colspan="6" style="text-align:center; padding: 40px;">
                         <h3>⚠️ SuperJob: Требуется авторизация</h3>
@@ -1507,7 +1506,7 @@ MAIN_HTML = '''
                 `;
                 isLoading = false; hasMore = false;
                 document.getElementById('loadingIndicator').style.display = 'none';
-                updateAuthStatus();
+                updateAuthStatus('superjob');
                 return;
             }
             
@@ -1691,7 +1690,7 @@ MAIN_HTML = '''
             currentCities = [defaultId];
             
             loadCities();
-            updateAuthStatus(); // Обновляем статус авторизации при загрузке страницы
+            updateAuthStatus('all'); // Обновляем статус авторизации при загрузке страницы
             
             document.getElementById('exclusionInput').addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') addExclusion();
