@@ -997,15 +997,15 @@ MAIN_HTML = '''
 
         async function getSjTokens(code) {
             try {
-                const response = await fetch('/get_sj_tokens', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        code: code,
-                        redirect_uri: SUPERJOB_REDIRECT_URI,
-                        client_id: SUPERJOB_CLIENT_ID,
-                        client_secret: SUPERJOB_SECRET_KEY
-                    })
+                const params = new URLSearchParams({
+                    code: code,
+                    redirect_uri: SUPERJOB_REDIRECT_URI,
+                    client_id: SUPERJOB_CLIENT_ID,
+                    client_secret: SUPERJOB_SECRET_KEY
+                });
+                const response = await fetch(`/get_sj_tokens?${params.toString()}`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' } // Keep Content-Type for consistency, though not strictly needed for GET with params
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
@@ -1030,14 +1030,14 @@ MAIN_HTML = '''
         async function refreshSjToken() {
             if (!sjRefreshToken) return false;
             try {
-                const response = await fetch('/refresh_sj_token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        refresh_token: sjRefreshToken,
-                        client_id: SUPERJOB_CLIENT_ID,
-                        client_secret: SUPERJOB_SECRET_KEY
-                    })
+                const params = new URLSearchParams({
+                    refresh_token: sjRefreshToken,
+                    client_id: SUPERJOB_CLIENT_ID,
+                    client_secret: SUPERJOB_SECRET_KEY
+                });
+                const response = await fetch(`/refresh_sj_token?${params.toString()}`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' } // Keep Content-Type for consistency
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
