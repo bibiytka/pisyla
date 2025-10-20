@@ -899,7 +899,7 @@ MAIN_HTML = '''
                     </tr>
                 </thead>
                 <tbody id="vacancyTableBody">
-                    <tr><td colspan="5" class="loader">Нажмите "Найти вакансии"</td></tr>
+                    <tr><td colspan="6" class="no-results">Нажмите "Найти вакансии"</td></tr>
                 </tbody>
             </table>
 
@@ -1322,7 +1322,7 @@ MAIN_HTML = '''
             currentQuery = document.getElementById('query').value.trim() || 'склад';
             
             const tbody = document.getElementById('vacancyTableBody');
-            tbody.innerHTML = '<tr><td colspan="5" class="loader"><div class="spinner"></div>Поиск...</td></tr>';
+            tbody.innerHTML = ''; // Очищаем таблицу при новом поиске
             
             document.getElementById('stats').style.display = 'none';
             document.getElementById('currentSourceBadge').textContent = currentSource === 'hh' ? 'HH.ru' : 'SuperJob';
@@ -1346,8 +1346,8 @@ MAIN_HTML = '''
             
             try {
                 const params = new URLSearchParams({
-                    text: currentQuery, # Ищем по тексту из поля ввода
-                    per_page: 20,      # Загружаем по 20 вакансий за раз
+                    text: currentQuery,
+                    per_page: 20, // Загружаем по 20 вакансий
                     page: currentPage,
                     order_by: 'publication_time'
                 });
@@ -1374,7 +1374,7 @@ MAIN_HTML = '''
                 
                 const data = await response.json();
                 totalFound = data.found;
-                hasMore = currentPage < data.pages - 1 && currentPage < 19;
+                hasMore = currentPage < data.pages - 1; // Убираем ограничение на 19 страниц
 
                 const tbody = document.getElementById('vacancyTableBody');
                 if (currentPage === 0) tbody.innerHTML = '';
@@ -1520,7 +1520,7 @@ MAIN_HTML = '''
 
             for (const cityId of citiesToSearch) {
                 const params = new URLSearchParams({
-                    keyword: currentQuery, count: 100, page: currentPage,
+                    keyword: currentQuery, count: 20, page: currentPage, // Загружаем по 20 вакансий
                     order_field: 'date', order_direction: 'desc'
                 });
 
@@ -1685,13 +1685,11 @@ MAIN_HTML = '''
         }
 
         window.onload = () => {
-            // Определяем начальный источник на основе выбранного радио-баттона
-            const initialSourceRadio = document.querySelector('input[name="source"]:checked');
-            currentSource = initialSourceRadio ? initialSourceRadio.value : 'hh'; // По умолчанию HH.ru
-
-            // Инициализируем UI и города для выбранного источника
-            switchSource(currentSource);
-            // loadCities() вызывается внутри switchSource, поэтому здесь не нужно
+            // Set initial default city
+            const defaultId = currentSource === 'hh' ? 2 : 4;
+            currentCities = [defaultId];
+            
+            loadCities();
             updateAuthStatus('all'); // Обновляем статус авторизации при загрузке страницы
             
             document.getElementById('exclusionInput').addEventListener('keypress', (e) => {
