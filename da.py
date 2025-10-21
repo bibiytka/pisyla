@@ -897,6 +897,14 @@ MAIN_HTML = '''
                     <span class="stat-number" id="statExcluded">0</span>
                     <span class="stat-label">Исключено</span>
                 </div>
+                <div class="stat-item">
+                    <span class="stat-number" id="statExcluded">0</span>
+                    <span class="stat-label">Исключено</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number" id="statVps">0</span>
+                    <span class="stat-label">Вакансий/сек</span>
+                </div>
             </div>
         </div>
 
@@ -968,6 +976,7 @@ MAIN_HTML = '''
         let loadedCount = 0;
         let withSalaryCount = 0;
         let excludedCount = 0;
+        let vacanciesPerSecond = 0; // Новая переменная для скорости загрузки
         let currentQuery = '';
         let currentSource = 'hh';
         let exclusionWords = [];
@@ -1373,6 +1382,7 @@ MAIN_HTML = '''
             withSalaryCount = 0;
             excludedCount = 0;
             totalFound = 0;
+            vacanciesPerSecond = 0; // Сбрасываем при новом поиске
             
             currentQuery = document.getElementById('query').value.trim() || 'склад';
             keywordFilterWord = document.getElementById('keywordFilterInput').value.trim().toLowerCase();
@@ -1400,6 +1410,8 @@ MAIN_HTML = '''
         async function loadFromHH() {
             isLoading = true;
             document.getElementById('loadingIndicator').style.display = 'block';
+            
+            const loadStartTime = performance.now(); // Засекаем время начала загрузки
             
             try {
                 const params = new URLSearchParams({
@@ -1458,7 +1470,6 @@ MAIN_HTML = '''
                         // Если есть HH access token, делаем запрос за детальной информацией
                         if (hhAccessToken && hhExpiresIn && Date.now() < parseInt(hhExpiresIn)) {
                             try {
-                                await delay(500); // Добавляем задержку в 500 мс перед каждым детальным запросом
                                 const detailResponse = await fetch(`https://api.hh.ru/vacancies/${basicVacancy.id}`, {
                                     headers: {
                                         'Authorization': `Bearer ${hhAccessToken}`,
@@ -1535,6 +1546,12 @@ MAIN_HTML = '''
                         }
                     }
 
+                    const loadEndTime = performance.now(); // Засекаем время окончания загрузки
+                    const loadDuration = (loadEndTime - loadStartTime) / 1000; // Длительность в секундах
+                    if (loadDuration > 0) {
+                        vacanciesPerSecond = loadedCount / loadDuration;
+                    }
+                    
                     updateStats();
                     currentPage++;
                 } else if (currentPage === 0) {
@@ -1725,6 +1742,7 @@ MAIN_HTML = '''
             document.getElementById('statLoaded').textContent = loadedCount.toLocaleString();
             document.getElementById('statWithSalary').textContent = withSalaryCount.toLocaleString();
             document.getElementById('statExcluded').textContent = excludedCount.toLocaleString();
+            document.getElementById('statVps').textContent = vacanciesPerSecond.toFixed(2); // Отображаем с двумя знаками после запятой
         }
 
         window.addEventListener('scroll', () => {
