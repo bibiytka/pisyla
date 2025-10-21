@@ -2,9 +2,12 @@
 # Полное приложение для поиска вакансий HH.ru + SuperJob
 # Для PythonAnywhere
 
-from flask import Flask, request, Response, render_template_string, redirect, url_for
+from flask import Flask, request, Response, render_template_string, redirect, url_for, send_file
 import requests
 import json
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, Border, Side, Alignment
 
 app = Flask(__name__)
 
@@ -182,6 +185,73 @@ def index():
         '''
     )
     return render_template_string(html)
+
+# ============ ЭКСПОРТ В EXCEL ============
+@app.route('/export_to_excel', methods=['POST'])
+def export_to_excel():
+    data = request.get_json()
+    vacancies = data.get('vacancies', [])
+
+    if not vacancies:
+        return {'error': 'No vacancies provided'}, 400
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Вакансии"
+
+    # Заголовки
+    headers = ["Должность", "Компания", "Зарплата", "Город", "Дата", "Телефон", "Email", "Имя контакта"]
+    ws.append(headers)
+
+    # Стили для заголовков
+    header_font = Font(bold=True)
+    thin_border = Border(left=Side(style='thin'), 
+                         right=Side(style='thin'), 
+                         top=Side(style='thin'), 
+                         bottom=Side(style='thin'))
+    center_aligned_text = Alignment(horizontal="center")
+
+    for col_num, cell in enumerate(ws[1], 1):
+        cell.font = header_font
+        cell.border = thin_border
+        cell.alignment = center_aligned_text
+        # Устанавливаем ширину колонок
+        if col_num == 1: ws.column_dimensions[chr(64 + col_num)].width = 40
+        elif col_num == 2: ws.column_dimensions[chr(64 + col_num)].width = 30
+        elif col_num == 3: ws.column_dimensions[chr(64 + col_num)].width = 20
+        elif col_num == 4: ws.column_dimensions[chr(64 + col_num)].width = 20
+        elif col_num == 5: ws.column_dimensions[chr(64 + col_num)].width = 15
+        elif col_num == 6: ws.column_dimensions[chr(64 + col_num)].width = 25
+        elif col_num == 7: ws.column_dimensions[chr(64 + col_num)].width = 30
+        elif col_num == 8: ws.column_dimensions[chr(64 + col_num)].width = 25
+
+    # Данные
+    for vacancy in vacancies:
+        ws.append([
+            vacancy.get('title', ''),
+            vacancy.get('company', ''),
+            vacancy.get('salary', ''),
+            vacancy.get('location', ''),
+            vacancy.get('date', ''),
+            vacancy.get('phone', ''),
+            vacancy.get('email', ''),
+            vacancy.get('contactName', '')
+        ])
+        # Применяем границы к ячейкам данных
+        for cell in ws[ws.max_row]:
+            cell.border = thin_border
+
+    # Сохраняем книгу в байтовый поток
+    excel_file = io.BytesIO()
+    wb.save(excel_file)
+    excel_file.seek(0)
+
+    return send_file(
+        excel_file,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name='vacancies.xlsx'
+    )
 
 # ============ HTML CALLBACK СТРАНИЦЫ ============
 CALLBACK_HTML = '''
@@ -849,7 +919,8 @@ MAIN_HTML = '''
                 </label>
             </div>
 
-            <button onclick="startNewSearch()" class="btn-search">🔎 Найти вакансии</button>
+            <button onclick="startNewSearch()" class="btn-search" style="margin-bottom: 10px;">🔎 Найти вакансии</button>
+            <button onclick="exportToExcel()" class="btn-search" style="background: #28a745;">📊 Экспорт в Excel</button>
         </div>
 
         <div class="stats" id="stats" style="display: none;">
@@ -1705,6 +1776,87 @@ MAIN_HTML = '''
                 zarplata: `https://www.zarplata.ru/vacancies?search=${encoded}`
             };
             if (urls[platform]) window.open(urls[platform], '_blank');
+        }
+
+        function exportToExcel() {
+            const tableBody = document.getElementById('vacancyTableBody');
+            const rows = Array.from(tableBody.rows);
+            
+            if (rows.length === 0 || rows[0].classList.contains('no-results')) {
+                alert('Нет вакансий для экспорта.');
+                return;
+            }
+
+            const vacancies = [];
+            rows.forEach(row => {
+                const cells = row.cells;
+                if (cells.length === 6) { // Убедимся, что это строка с вакансией, а не "нет результатов"
+                    const title = cells[0].querySelector('.vacancy-title')?.textContent.trim().replace(/NEW|HH|SJ/g, '').trim() || '';
+                    const company = cells[1].querySelector('.company-name')?.textContent.trim() || '';
+                    const salary = cells[2].querySelector('.salary')?.textContent.trim() || '';
+                    const location = cells[3].querySelector('.location')?.textContent.trim() || '';
+                    const date = cells[4].querySelector('.date')?.textContent.trim() || '';
+                    
+                    // Извлекаем контакты
+                    let phone = '';
+                    let email = '';
+                    let contactName = '';
+                    const contactsDiv = cells[5].querySelector('.contacts');
+                    if (contactsDiv) {
+                        const phoneSpan = contactsDiv.querySelector('.contact-phone');
+                        if (phoneSpan) phone = phoneSpan.textContent.trim();
+                        const emailSpan = contactsDiv.querySelector('.contact-email');
+                        if (emailSpan) email = emailSpan.textContent.trim();
+                        const nameSpan = contactsDiv.querySelector('.contact-name');
+                        if (nameSpan) contactName = nameSpan.textContent.trim();
+                    }
+
+                    vacancies.push({
+                        title: title,
+                        company: company,
+                        salary: salary,
+                        location: location,
+                        date: date,
+                        phone: phone,
+                        email: email,
+                        contactName: contactName
+                    });
+                }
+            });
+
+            if (vacancies.length === 0) {
+                alert('Нет вакансий для экспорта.');
+                return;
+            }
+
+            fetch('/export_to_excel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ vacancies: vacancies }),
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.blob();
+                }
+                throw new Error('Ошибка экспорта в Excel');
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'vacancies.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                alert('Вакансии успешно экспортированы в Excel!');
+            })
+            .catch(error => {
+                console.error('Ошибка при экспорте:', error);
+                alert('Произошла ошибка при экспорте вакансий в Excel.');
+            });
         }
 
         window.onload = () => {
