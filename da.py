@@ -814,16 +814,6 @@ MAIN_HTML = '''
                 </div>
             </div>
 
-            <div class="filter-row">
-                <div class="filter-group">
-                    <label for="sortOrder">Сортировка:</label>
-                    <select id="sortOrder" onchange="updateSortOrder()">
-                        <option value="publication_time">По дате публикации</option>
-                        <option value="relevance">По релевантности</option>
-                    </select>
-                </div>
-            </div>
-
             <div id="exclusionBlock" class="filter-row">
                 <div class="filter-group" style="flex: 1 1 100%;">
                     <label for="exclusionInput">
@@ -835,19 +825,6 @@ MAIN_HTML = '''
                     <div class="exclusion-tags" id="exclusionTags">
                         <small style="color: #7f8c8d;">Нет исключений</small>
                     </div>
-                </div>
-            </div>
-
-            <div class="filter-row">
-                <div class="filter-group" style="flex: 1 1 100%;">
-                    <label for="keywordFilterInput">
-                        Фильтр по ключевому слову:
-                        <small>Введите слово, например "грузчик". Вакансии будут показаны, если содержат это слово, но не содержат других слов, заканчивающихся на "ик" (кроме введенного).</small>
-                    </label>
-                    <input type="text" id="keywordFilterInput" placeholder="Введите ключевое слово">
-                    <label style="margin-top: 10px;">
-                        <input type="checkbox" id="excludeSuffixFilter"> Активировать фильтр "без других -ик"
-                    </label>
                 </div>
             </div>
 
@@ -873,39 +850,6 @@ MAIN_HTML = '''
             </div>
 
             <button onclick="startNewSearch()" class="btn-search">🔎 Найти вакансии</button>
-        </div>
-
-        <div class="stats" id="stats" style="display: none;">
-            <h3 style="margin: 0 0 10px 0;">
-                📊 Статистика
-                <span class="source-badge" id="currentSourceBadge">HH.ru</span>
-            </h3>
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <span class="stat-number" id="statTotal">0</span>
-                    <span class="stat-label">Всего найдено</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number" id="statLoaded">0</span>
-                    <span class="stat-label">Загружено</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number" id="statWithSalary">0</span>
-                    <span class="stat-label">С зарплатой</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number" id="statExcluded">0</span>
-                    <span class="stat-label">Исключено</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number" id="statExcluded">0</span>
-                    <span class="stat-label">Исключено</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number" id="statVps">0</span>
-                    <span class="stat-label">Вакансий/сек</span>
-                </div>
-            </div>
         </div>
 
         <div class="external-links">
@@ -976,13 +920,9 @@ MAIN_HTML = '''
         let loadedCount = 0;
         let withSalaryCount = 0;
         let excludedCount = 0;
-        let vacanciesPerSecond = 0; // Новая переменная для скорости загрузки
         let currentQuery = '';
         let currentSource = 'hh';
         let exclusionWords = [];
-        let currentSortOrder = 'publication_time'; // Default sort order for HH.ru
-        let keywordFilterWord = '';
-        let excludeSuffixActive = false;
 
         const citiesHH = {
             1: 'Москва', 2: 'Санкт-Петербург', 3: 'Екатеринбург',
@@ -1319,11 +1259,6 @@ MAIN_HTML = '''
             document.getElementById('selectedCitiesText').textContent = text;
         }
 
-        function updateSortOrder() {
-            currentSortOrder = document.getElementById('sortOrder').value;
-            startNewSearch(); // Перезапускаем поиск при изменении сортировки
-        }
-
         function addExclusion() {
             const word = document.getElementById('exclusionInput').value.trim().toLowerCase();
             if (word && !exclusionWords.includes(word)) {
@@ -1355,26 +1290,6 @@ MAIN_HTML = '''
             return exclusionWords.some(word => text.toLowerCase().includes(word));
         }
 
-        function isCustomFiltered(text, keyword, excludeSuffix) {
-            if (!excludeSuffix || !keyword) return false; // Фильтр не активен или нет ключевого слова
-
-            const keywordRegex = new RegExp(`\\b${keyword}\\b`, 'i');
-            if (!keywordRegex.test(text)) {
-                return true; // Исключаем, если ключевого слова нет
-            }
-
-            // Проверяем наличие других слов, заканчивающихся на "ик", кроме ключевого слова
-            const suffixRegex = /\b\w*ик\b/gi;
-            let match;
-            while ((match = suffixRegex.exec(text)) !== null) {
-                const foundWord = match[0].toLowerCase();
-                if (foundWord !== keyword) {
-                    return true; // Исключаем, если найдено другое слово на "ик"
-                }
-            }
-            return false; // Не исключаем, если все условия выполнены
-        }
-
         function startNewSearch() {
             currentPage = 0;
             hasMore = true;
@@ -1382,17 +1297,11 @@ MAIN_HTML = '''
             withSalaryCount = 0;
             excludedCount = 0;
             totalFound = 0;
-            vacanciesPerSecond = 0; // Сбрасываем при новом поиске
             
             currentQuery = document.getElementById('query').value.trim() || 'склад';
-            keywordFilterWord = document.getElementById('keywordFilterInput').value.trim().toLowerCase();
-            excludeSuffixActive = document.getElementById('excludeSuffixFilter').checked;
             
             const tbody = document.getElementById('vacancyTableBody');
             tbody.innerHTML = ''; // Очищаем таблицу при новом поиске
-            
-            document.getElementById('stats').style.display = 'none';
-            document.getElementById('currentSourceBadge').textContent = currentSource === 'hh' ? 'HH.ru' : 'SuperJob';
             
             loadMoreVacancies();
         }
@@ -1546,13 +1455,6 @@ MAIN_HTML = '''
                         }
                     }
 
-                    const loadEndTime = performance.now(); // Засекаем время окончания загрузки
-                    const loadDuration = (loadEndTime - loadStartTime) / 1000; // Длительность в секундах
-                    if (loadDuration > 0) {
-                        vacanciesPerSecond = loadedCount / loadDuration;
-                    }
-                    
-                    updateStats();
                     currentPage++;
                 } else if (currentPage === 0) {
                 tbody.innerHTML = `<tr><td colspan="6" class="no-results">😔 Не найдено</td></tr>`;
@@ -1597,15 +1499,6 @@ MAIN_HTML = '''
                 const params = new URLSearchParams({
                     keyword: currentQuery, count: 20, page: currentPage // Загружаем по 20 вакансий
                 });
-
-                // Применяем сортировку для SuperJob
-                if (currentSortOrder === 'publication_time') {
-                    params.append('order_field', 'date');
-                    params.append('order_direction', 'desc');
-                } else if (currentSortOrder === 'relevance') {
-                    params.append('order_field', 'relevance');
-                    params.append('order_direction', 'desc'); // SuperJob по умолчанию сортирует по релевантности, но явно укажем
-                }
 
                 params.append('t', cityId); // Append only one city ID per request
 
@@ -1658,7 +1551,7 @@ MAIN_HTML = '''
                         }
                         
                         const fullText = `${v.profession} ${companyName} ${v.candidat || ''} ${v.work || ''}`.toLowerCase();
-                        if (isExcluded(fullText) || isCustomFiltered(fullText, keywordFilterWord, excludeSuffixActive)) {
+                        if (isExcluded(fullText)) {
                             excludedCount++;
                             return;
                         }
@@ -1705,7 +1598,6 @@ MAIN_HTML = '''
                         }
                     });
 
-                    updateStats();
                     currentPage++;
                 } else if (currentPage === 0) {
                     tbody.innerHTML = `<tr><td colspan="6" class="no-results">😔 Не найдено</td></tr>`;
@@ -1734,15 +1626,6 @@ MAIN_HTML = '''
                 `;
             }
             hasMore = false;
-        }
-
-        function updateStats() {
-            document.getElementById('stats').style.display = 'block';
-            document.getElementById('statTotal').textContent = totalFound.toLocaleString();
-            document.getElementById('statLoaded').textContent = loadedCount.toLocaleString();
-            document.getElementById('statWithSalary').textContent = withSalaryCount.toLocaleString();
-            document.getElementById('statExcluded').textContent = excludedCount.toLocaleString();
-            document.getElementById('statVps').textContent = vacanciesPerSecond.toFixed(2); // Отображаем с двумя знаками после запятой
         }
 
         window.addEventListener('scroll', () => {
