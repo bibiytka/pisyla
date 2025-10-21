@@ -840,13 +840,9 @@ MAIN_HTML = '''
 
             <div class="filter-row">
                 <div class="filter-group" style="flex: 1 1 100%;">
-                    <label for="keywordFilterInput">
-                        Фильтр по ключевому слову:
-                        <small>Введите слово, например "грузчик". Вакансии будут показаны, если содержат это слово, но не содержат других слов, заканчивающихся на "ик" (кроме введенного).</small>
-                    </label>
-                    <input type="text" id="keywordFilterInput" placeholder="Введите ключевое слово">
                     <label style="margin-top: 10px;">
                         <input type="checkbox" id="excludeSuffixFilter"> Активировать фильтр "без других -ик"
+                        <small>Вакансии будут показаны, если содержат ключевое слово из основного запроса, но не содержат других слов, заканчивающихся на "ик" (кроме введенного).</small>
                     </label>
                 </div>
             </div>
@@ -872,7 +868,8 @@ MAIN_HTML = '''
                 </label>
             </div>
 
-            <button onclick="startNewSearch()" class="btn-search">🔎 Найти вакансии</button>
+            <button onclick="startNewSearch()" class="btn-search" style="margin-bottom: 10px;">🔎 Найти вакансии</button>
+            <button onclick="exportToExcel()" class="btn-search" style="background: #28a745;">📊 Выгрузить в Excel</button>
         </div>
 
         <div class="stats" id="stats" style="display: none;">
@@ -972,7 +969,6 @@ MAIN_HTML = '''
         let currentSource = 'hh';
         let exclusionWords = [];
         let currentSortOrder = 'publication_time'; // Default sort order for HH.ru
-        let keywordFilterWord = '';
         let excludeSuffixActive = false;
 
         const citiesHH = {
@@ -1346,20 +1342,20 @@ MAIN_HTML = '''
             return exclusionWords.some(word => text.toLowerCase().includes(word));
         }
 
-        function isCustomFiltered(text, keyword, excludeSuffix) {
-            if (!excludeSuffix || !keyword) return false; // Фильтр не активен или нет ключевого слова
+        function isCustomFiltered(vacancyTitle, excludeSuffix) {
+            if (!excludeSuffix || !currentQuery) return false; // Фильтр не активен или нет основного запроса
 
-            const keywordRegex = new RegExp(`\\b${keyword}\\b`, 'i');
-            if (!keywordRegex.test(text)) {
-                return true; // Исключаем, если ключевого слова нет
+            const keywordRegex = new RegExp(`\\b${currentQuery}\\b`, 'i');
+            if (!keywordRegex.test(vacancyTitle)) {
+                return true; // Исключаем, если ключевого слова из запроса нет в названии
             }
 
-            // Проверяем наличие других слов, заканчивающихся на "ик", кроме ключевого слова
+            // Проверяем наличие других слов, заканчивающихся на "ик", кроме ключевого слова из запроса
             const suffixRegex = /\b\w*ик\b/gi;
             let match;
-            while ((match = suffixRegex.exec(text)) !== null) {
+            while ((match = suffixRegex.exec(vacancyTitle)) !== null) {
                 const foundWord = match[0].toLowerCase();
-                if (foundWord !== keyword) {
+                if (foundWord !== currentQuery.toLowerCase()) { // Сравниваем с основным запросом
                     return true; // Исключаем, если найдено другое слово на "ик"
                 }
             }
@@ -1448,8 +1444,7 @@ MAIN_HTML = '''
                             continue;
                         }
 
-                        const fullText = `${basicVacancy.name} ${companyName} ${basicVacancy.snippet?.requirement || ''} ${basicVacancy.snippet?.responsibility || ''}`.toLowerCase();
-                        if (isExcluded(fullText) || isCustomFiltered(fullText, keywordFilterWord, excludeSuffixActive)) {
+                        if (isExcluded(basicVacancy.name) || isCustomFiltered(basicVacancy.name, excludeSuffixActive)) {
                             excludedCount++;
                             continue;
                         }
@@ -1640,8 +1635,7 @@ MAIN_HTML = '''
                             return;
                         }
                         
-                        const fullText = `${v.profession} ${companyName} ${v.candidat || ''} ${v.work || ''}`.toLowerCase();
-                        if (isExcluded(fullText) || isCustomFiltered(fullText, keywordFilterWord, excludeSuffixActive)) {
+                        if (isExcluded(v.profession) || isCustomFiltered(v.profession, excludeSuffixActive)) {
                             excludedCount++;
                             return;
                         }
@@ -1772,6 +1766,38 @@ MAIN_HTML = '''
                 if (e.key === 'Enter') startNewSearch();
             });
         };
+
+        function exportToExcel() {
+            const table = document.getElementById('vacancyTable');
+            let csv = [];
+            
+            // Заголовки таблицы
+            const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+            csv.push(headers.join(';'));
+
+            // Строки данных
+            table.querySelectorAll('tbody tr').forEach(row => {
+                const rowData = Array.from(row.querySelectorAll('td')).map(td => {
+                    // Удаляем HTML-теги и лишние пробелы, заменяем переносы строк на пробелы
+                    let text = td.textContent.trim().replace(/\s+/g, ' ');
+                    // Экранируем кавычки и заключаем в кавычки, если есть запятые или точки с запятой
+                    if (text.includes(';') || text.includes(',') || text.includes('"') || text.includes('\n')) {
+                        text = `"${text.replace(/"/g, '""')}"`;
+                    }
+                    return text;
+                });
+                csv.push(rowData.join(';'));
+            });
+
+            const csvString = csv.join('\n');
+            const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvString], { type: 'text/csv;charset=utf-8;' }); // Добавляем BOM для корректного отображения кириллицы в Excel
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'vacancies.csv';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
     </script>
 </body>
 </html>
