@@ -852,6 +852,35 @@ MAIN_HTML = '''
             <button onclick="startNewSearch()" class="btn-search">🔎 Найти вакансии</button>
         </div>
 
+        <div class="stats" id="stats" style="display: none;">
+            <h3 style="margin: 0 0 10px 0;">
+                📊 Статистика
+                <span class="source-badge" id="currentSourceBadge">HH.ru</span>
+            </h3>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <span class="stat-number" id="statTotal">0</span>
+                    <span class="stat-label">Всего найдено</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number" id="statLoaded">0</span>
+                    <span class="stat-label">Загружено</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number" id="statWithSalary">0</span>
+                    <span class="stat-label">С зарплатой</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number" id="statExcluded">0</span>
+                    <span class="stat-label">Исключено</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number" id="statVps">0</span>
+                    <span class="stat-label">Вакансий/сек</span>
+                </div>
+            </div>
+        </div>
+
         <div class="external-links">
             <p style="margin: 0 0 10px 0; font-weight: bold; color: #856404;">🌐 Открыть на сайтах:</p>
             <button onclick="go('hh')" class="btn-hh">HH.ru</button>
@@ -920,6 +949,7 @@ MAIN_HTML = '''
         let loadedCount = 0;
         let withSalaryCount = 0;
         let excludedCount = 0;
+        let vacanciesPerSecond = 0; // Новая переменная для скорости загрузки
         let currentQuery = '';
         let currentSource = 'hh';
         let exclusionWords = [];
@@ -1297,11 +1327,15 @@ MAIN_HTML = '''
             withSalaryCount = 0;
             excludedCount = 0;
             totalFound = 0;
+            vacanciesPerSecond = 0; // Сбрасываем при новом поиске
             
             currentQuery = document.getElementById('query').value.trim() || 'склад';
             
             const tbody = document.getElementById('vacancyTableBody');
             tbody.innerHTML = ''; // Очищаем таблицу при новом поиске
+            
+            document.getElementById('stats').style.display = 'none';
+            document.getElementById('currentSourceBadge').textContent = currentSource === 'hh' ? 'HH.ru' : 'SuperJob';
             
             loadMoreVacancies();
         }
@@ -1326,8 +1360,7 @@ MAIN_HTML = '''
                 const params = new URLSearchParams({
                     text: currentQuery,
                     per_page: 10, // Загружаем по 10 вакансий
-                    page: currentPage,
-                    order_by: currentSortOrder // Используем выбранный порядок сортировки
+                    page: currentPage
                 });
 
                 currentCities.forEach(city => params.append('area', city));
@@ -1370,7 +1403,7 @@ MAIN_HTML = '''
                         }
 
                         const fullText = `${basicVacancy.name} ${companyName} ${basicVacancy.snippet?.requirement || ''} ${basicVacancy.snippet?.responsibility || ''}`.toLowerCase();
-                        if (isExcluded(fullText) || isCustomFiltered(fullText, keywordFilterWord, excludeSuffixActive)) {
+                        if (isExcluded(fullText)) {
                             excludedCount++;
                             continue;
                         }
@@ -1455,6 +1488,13 @@ MAIN_HTML = '''
                         }
                     }
 
+                    const loadEndTime = performance.now(); // Засекаем время окончания загрузки
+                    const loadDuration = (loadEndTime - loadStartTime) / 1000; // Длительность в секундах
+                    if (loadDuration > 0) {
+                        vacanciesPerSecond = loadedCount / loadDuration;
+                    }
+                    
+                    updateStats();
                     currentPage++;
                 } else if (currentPage === 0) {
                 tbody.innerHTML = `<tr><td colspan="6" class="no-results">😔 Не найдено</td></tr>`;
@@ -1598,6 +1638,7 @@ MAIN_HTML = '''
                         }
                     });
 
+                    updateStats();
                     currentPage++;
                 } else if (currentPage === 0) {
                     tbody.innerHTML = `<tr><td colspan="6" class="no-results">😔 Не найдено</td></tr>`;
@@ -1626,6 +1667,15 @@ MAIN_HTML = '''
                 `;
             }
             hasMore = false;
+        }
+
+        function updateStats() {
+            document.getElementById('stats').style.display = 'block';
+            document.getElementById('statTotal').textContent = totalFound.toLocaleString();
+            document.getElementById('statLoaded').textContent = loadedCount.toLocaleString();
+            document.getElementById('statWithSalary').textContent = withSalaryCount.toLocaleString();
+            document.getElementById('statExcluded').textContent = excludedCount.toLocaleString();
+            document.getElementById('statVps').textContent = vacanciesPerSecond.toFixed(2); // Отображаем с двумя знаками после запятой
         }
 
         window.addEventListener('scroll', () => {
