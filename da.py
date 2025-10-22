@@ -921,8 +921,9 @@ MAIN_HTML = '''
             </div>
 
             <button onclick="startNewSearch()" class="btn-search" style="margin-bottom: 10px;">🔎 Найти вакансии</button>
-            <button onclick="exportToExcel()" class="btn-search" style="background: #28a745; position: absolute; top: 10px; right: 10px; z-index: 9999;">📊 Экспорт в Excel</button>
         </div>
+
+        <button onclick="exportToExcel()" class="btn-search" style="background: #28a745; position: fixed; bottom: 90px; right: 20px; z-index: 9999; width: auto;">📊 Экспорт в Excel</button>
 
         <div class="stats" id="stats" style="display: none;">
             <h3 style="margin: 0 0 10px 0;">
@@ -1025,6 +1026,7 @@ MAIN_HTML = '''
         let currentQuery = '';
         let currentSource = 'hh';
         let exclusionWords = [];
+        let allLoadedVacancies = []; // Добавляем массив для хранения всех загруженных вакансий
 
         const citiesHH = {
             1: 'Москва', 2: 'Санкт-Петербург', 3: 'Екатеринбург',
@@ -1409,6 +1411,7 @@ MAIN_HTML = '''
             document.getElementById('stats').style.display = 'none';
             document.getElementById('currentSourceBadge').textContent = currentSource === 'hh' ? 'HH.ru' : 'SuperJob';
             
+            allLoadedVacancies = []; // Очищаем массив при новом поиске
             loadMoreVacancies();
         }
 
@@ -1558,6 +1561,18 @@ MAIN_HTML = '''
                         if (oneVacancyPerCompany) {
                             companiesAdded.add(companyName);
                         }
+                        
+                        // Добавляем вакансию в общий массив для экспорта
+                        allLoadedVacancies.push({
+                            title: detailedVacancy.name,
+                            company: companyName,
+                            salary: salary,
+                            location: detailedVacancy.area?.name || 'Не указано',
+                            date: formatDate(detailedVacancy.published_at),
+                            phone: detailedVacancy.contacts?.phones?.map(p => `${p.country ? '+' + p.country : ''}${p.city ? '(' + p.city + ')' : ''}${p.number || ''}`).join(', ') || '',
+                            email: detailedVacancy.contacts?.email || '',
+                            contactName: detailedVacancy.contacts?.name || ''
+                        });
                     }
 
                     const loadEndTime = performance.now(); // Засекаем время окончания загрузки
@@ -1708,6 +1723,18 @@ MAIN_HTML = '''
                         if (oneVacancyPerCompany) {
                             companiesAdded.add(companyName);
                         }
+
+                        // Добавляем вакансию в общий массив для экспорта
+                        allLoadedVacancies.push({
+                            title: v.profession,
+                            company: companyName,
+                            salary: salary,
+                            location: v.town?.title || '—',
+                            date: formatDateFromUnix(v.date_published),
+                            phone: v.phone || '',
+                            email: v.email || '',
+                            contactName: v.contact || ''
+                        });
                     });
 
                     updateStats();
@@ -1780,52 +1807,7 @@ MAIN_HTML = '''
         }
 
         function exportToExcel() {
-            const tableBody = document.getElementById('vacancyTableBody');
-            const rows = Array.from(tableBody.rows);
-            
-            if (rows.length === 0 || rows[0].classList.contains('no-results')) {
-                alert('Нет вакансий для экспорта.');
-                return;
-            }
-
-            const vacancies = [];
-            rows.forEach(row => {
-                const cells = row.cells;
-                if (cells.length === 6) { // Убедимся, что это строка с вакансией, а не "нет результатов"
-                    const title = cells[0].querySelector('.vacancy-title')?.textContent.trim().replace(/NEW|HH|SJ/g, '').trim() || '';
-                    const company = cells[1].querySelector('.company-name')?.textContent.trim() || '';
-                    const salary = cells[2].querySelector('.salary')?.textContent.trim() || '';
-                    const location = cells[3].querySelector('.location')?.textContent.trim() || '';
-                    const date = cells[4].querySelector('.date')?.textContent.trim() || '';
-                    
-                    // Извлекаем контакты
-                    let phone = '';
-                    let email = '';
-                    let contactName = '';
-                    const contactsDiv = cells[5].querySelector('.contacts');
-                    if (contactsDiv) {
-                        const phoneSpan = contactsDiv.querySelector('.contact-phone');
-                        if (phoneSpan) phone = phoneSpan.textContent.trim();
-                        const emailSpan = contactsDiv.querySelector('.contact-email');
-                        if (emailSpan) email = emailSpan.textContent.trim();
-                        const nameSpan = contactsDiv.querySelector('.contact-name');
-                        if (nameSpan) contactName = nameSpan.textContent.trim();
-                    }
-
-                    vacancies.push({
-                        title: title,
-                        company: company,
-                        salary: salary,
-                        location: location,
-                        date: date,
-                        phone: phone,
-                        email: email,
-                        contactName: contactName
-                    });
-                }
-            });
-
-            if (vacancies.length === 0) {
+            if (allLoadedVacancies.length === 0) {
                 alert('Нет вакансий для экспорта.');
                 return;
             }
@@ -1835,7 +1817,7 @@ MAIN_HTML = '''
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ vacancies: vacancies }),
+                body: JSON.stringify({ vacancies: allLoadedVacancies }),
             })
             .then(response => {
                 if (response.ok) {
