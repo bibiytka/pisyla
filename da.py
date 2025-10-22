@@ -925,6 +925,9 @@ MAIN_HTML = '''
                         ❓ Только целевая профессия (ик/ор/ий)
                     </small>
                 </label>
+                <label>
+                    <input type="checkbox" id="onlyWithContacts"> Только с контактами
+                </label>
             </div>
 
             <button onclick="startNewSearch()" class="btn-search" style="margin-bottom: 10px;">🔎 Найти вакансии</button>
@@ -1498,7 +1501,6 @@ MAIN_HTML = '''
             excludedCount = 0;
             excludedBySuffixDetails = { ик: 0, ор: 0, ий: 0, ец: 0, ер: 0 }; // Сбрасываем при новом поиске
             totalFound = 0;
-            vacanciesPerSecond = 0; // Сбрасываем при новом поиске
             
             currentQuery = document.getElementById('query').value.trim() || 'склад';
             
@@ -1581,6 +1583,8 @@ MAIN_HTML = '''
                         }
 
                         let detailedVacancy = basicVacancy;
+                        let hasContacts = false; // Флаг для проверки наличия контактов
+
                         // Если есть HH access token, делаем запрос за детальной информацией
                         if (hhAccessToken && hhExpiresIn && Date.now() < parseInt(hhExpiresIn)) {
                             try {
@@ -1592,12 +1596,21 @@ MAIN_HTML = '''
                                 });
                                 if (detailResponse.ok) {
                                     detailedVacancy = await detailResponse.json();
+                                    if (detailedVacancy.contacts && (detailedVacancy.contacts.phones?.length > 0 || detailedVacancy.contacts.email)) {
+                                        hasContacts = true;
+                                    }
                                 } else {
                                     console.warn(`Failed to fetch detailed HH vacancy ${basicVacancy.id}: ${detailResponse.status}`);
                                 }
                             } catch (detailError) {
                                 console.error(`Error fetching detailed HH vacancy ${basicVacancy.id}:`, detailError);
                             }
+                        }
+
+                        // Фильтрация по наличию контактов
+                        if (document.getElementById('onlyWithContacts')?.checked && !hasContacts) {
+                            excludedCount++;
+                            continue;
                         }
 
                         const salary = detailedVacancy.salary 
@@ -1609,7 +1622,7 @@ MAIN_HTML = '''
 
                         // Форматирование контактов
                         let contactsHTML = '<span class="no-contacts">—</span>';
-                        if (detailedVacancy.contacts) {
+                        if (hasContacts) { // Используем флаг hasContacts
                             let contactParts = [];
                             
                             // Телефоны
@@ -1780,6 +1793,17 @@ MAIN_HTML = '''
                             return;
                         }
 
+                        let hasContacts = false; // Флаг для проверки наличия контактов
+                        if (v.phone || v.email || v.contact) {
+                            hasContacts = true;
+                        }
+
+                        // Фильтрация по наличию контактов
+                        if (document.getElementById('onlyWithContacts')?.checked && !hasContacts) {
+                            excludedCount++;
+                            return;
+                        }
+
                         const salary = v.payment_from || v.payment_to
                             ? `${v.payment_from ? v.payment_from.toLocaleString() : ''}${v.payment_to ? ' – ' + v.payment_to.toLocaleString() : ''} ₽`.trim()
                             : v.agreement ? "По дог." : "—";
@@ -1791,18 +1815,20 @@ MAIN_HTML = '''
                         let sjContactsHTML = '<span class="no-contacts">—</span>';
                         let sjContactParts = [];
 
-                        if (v.phone) {
-                            sjContactParts.push(`<span class="contact-phone">${v.phone}</span>`);
-                        }
-                        if (v.email) {
-                            sjContactParts.push(`<span class="contact-email">${v.email}</span>`);
-                        }
-                        if (v.contact) {
-                            sjContactParts.push(`<span class="contact-name">${v.contact}</span>`);
-                        }
+                        if (hasContacts) { // Используем флаг hasContacts
+                            if (v.phone) {
+                                sjContactParts.push(`<span class="contact-phone">${v.phone}</span>`);
+                            }
+                            if (v.email) {
+                                sjContactParts.push(`<span class="contact-email">${v.email}</span>`);
+                            }
+                            if (v.contact) {
+                                sjContactParts.push(`<span class="contact-name">${v.contact}</span>`);
+                            }
 
-                        if (sjContactParts.length > 0) {
-                            sjContactsHTML = `<div class="contacts">${sjContactParts.join('<br>')}</div>`;
+                            if (sjContactParts.length > 0) {
+                                sjContactsHTML = `<div class="contacts">${sjContactParts.join('<br>')}</div>`;
+                            }
                         }
 
                         const row = document.createElement("tr");
@@ -1883,6 +1909,11 @@ MAIN_HTML = '''
             } else {
                 suffixStat.style.display = 'none';
             }
+
+            // Обновляем статистику для вакансий с контактами (если нужно)
+            // В данный момент нет отдельного счетчика для "только с контактами",
+            // так как это фильтр, который уменьшает loadedCount.
+            // Если нужен отдельный счетчик, его нужно добавить в логику загрузки.
         }
 
         window.addEventListener('scroll', () => {
