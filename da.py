@@ -918,6 +918,13 @@ MAIN_HTML = '''
                 <label>
                     <input type="checkbox" id="oneVacancyPerCompany"> Одна вакансия от компании
                 </label>
+                <label>
+                    <input type="checkbox" id="filterBySuffix"> 
+                    Фильтр по суффиксам
+                    <small title="Исключает вакансии с другими профессиями на 'ик', 'ор', 'ий'">
+                        ❓ Только целевая профессия (ик/ор/ий)
+                    </small>
+                </label>
             </div>
 
             <button onclick="startNewSearch()" class="btn-search" style="margin-bottom: 10px;">🔎 Найти вакансии</button>
@@ -947,9 +954,12 @@ MAIN_HTML = '''
                     <span class="stat-number" id="statExcluded">0</span>
                     <span class="stat-label">Исключено</span>
                 </div>
-                <div class="stat-item">
-                    <span class="stat-number" id="statVps">0</span>
-                    <span class="stat-label">Вакансий/сек</span>
+                <div class="stat-item" id="statSuffixExcluded" style="display:none;">
+                    <span class="stat-number" id="statSuffixCount">0</span>
+                    <span class="stat-label">
+                        Исключено по суффиксам
+                        <span id="suffixDetails" style="font-size:10px; display:block;"></span>
+                    </span>
                 </div>
             </div>
         </div>
@@ -1022,6 +1032,7 @@ MAIN_HTML = '''
         let loadedCount = 0;
         let withSalaryCount = 0;
         let excludedCount = 0;
+        let excludedBySuffixDetails = { ик: 0, ор: 0, ий: 0 }; // Добавляем переменную для статистики по суффиксам
         let vacanciesPerSecond = 0; // Новая переменная для скорости загрузки
         let currentQuery = '';
         let currentSource = 'hh';
@@ -1394,12 +1405,98 @@ MAIN_HTML = '''
             return exclusionWords.some(word => text.toLowerCase().includes(word));
         }
 
+        function shouldExcludeBySuffix(vacancyTitle, query) {
+            const filterBySuffixChecked = document.getElementById('filterBySuffix')?.checked;
+            if (!filterBySuffixChecked) return false;
+
+            const queryLower = query.toLowerCase().trim();
+            const titleLower = vacancyTitle.toLowerCase();
+
+            // Разбиваем на слова (дефис теперь является разделителем)
+            const queryWords = queryLower.split(/[^\wа-яё]+/ui).filter(w => w.length > 0);
+            const titleWords = titleLower.split(/[^\wа-яё]+/ui).filter(w => w.length > 0);
+            
+            // Суффиксы для проверки
+            const suffixes = ['ик', 'ор', 'ий', 'ец', 'ер'];
+            
+            // 1. Проверяем, есть ли хотя бы одно слово из запроса в названии
+            // Если запрос пуст, то нет обязательных слов, и этот критерий не применяется.
+            if (queryWords.length > 0) {
+                const hasQueryWord = queryWords.some(qWord => 
+                    titleWords.some(tWord => 
+                        tWord === qWord || 
+                        tWord.startsWith(qWord) || 
+                        qWord.startsWith(tWord.slice(0, -1))
+                    )
+                );
+                
+                if (!hasQueryWord) {
+                    // Если ни одно слово из запроса не найдено в названии, исключаем вакансию
+                    return true; 
+                }
+            }
+
+            // 2. Создаем Set корней слов из запроса для быстрой проверки
+            const queryRoots = new Set();
+            queryWords.forEach(w => {
+                // Убираем окончания для "ик"
+                if (w.endsWith('ик') || w.endsWith('ики') || w.endsWith('ика') || w.endsWith('иков') || w.endsWith('икам')) {
+                    queryRoots.add(w.replace(/(ик|ики|ика|иков|икам)$/ui, ''));
+                }
+                // Убираем окончания для "ор"
+                if (w.endsWith('ор') || w.endsWith('оры') || w.endsWith('ора') || w.endsWith('оров') || w.endsWith('орам')) {
+                    queryRoots.add(w.replace(/(ор|оры|ора|оров|орам)$/ui, ''));
+                }
+                // Убираем окончания для "ий"
+                if (w.endsWith('ий') || w.endsWith('ие') || w.endsWith('ия') || w.endsWith('их') || w.endsWith('им')) {
+                    queryRoots.add(w.replace(/(ий|ие|ия|их|им)$/ui, ''));
+                }
+                // Убираем окончания для "ец"
+                if (w.endsWith('ец') || w.endsWith('цы') || w.endsWith('ца')) {
+                    queryRoots.add(w.replace(/(ец|цы|ца|цов|цам)$/ui, ''));
+                }
+                // Убираем окончания для "ер"
+                if (w.endsWith('ер') || w.endsWith('еры') || w.endsWith('ера')) {
+                    queryRoots.add(w.replace(/(ер|еры|ера|еров|ерам)$/ui, ''));
+                }
+                queryRoots.add(w);
+            });
+            
+            // 3. Ищем слова с указанными суффиксами, которых нет в запросе
+            for (const word of titleWords) {
+                // Проверяем каждый суффикс
+                for (const suffix of suffixes) {
+                    if (word.endsWith(suffix) && word.length > suffix.length) {
+                        const wordRoot = word.slice(0, -suffix.length);
+                        
+                        // Проверяем: это слово из запроса или нет?
+                        const isQueryWord = queryWords.some(qw => 
+                            qw === word || 
+                            qw.startsWith(word) || 
+                            word.startsWith(qw) ||
+                            queryRoots.has(wordRoot) ||
+                            qw === wordRoot
+                        );
+                        
+                        if (!isQueryWord) {
+                            excludedBySuffixDetails[suffix]++; // 📊 Считаем по типам
+                            console.log(`🚫 Исключена: "${vacancyTitle}" - найдено "${word}" (суффикс "${suffix}")`);
+                            return true; // Исключаем вакансию
+                        }
+                    }
+                }
+            }
+            
+            return false;
+        }
+
         function startNewSearch() {
             currentPage = 0;
             hasMore = true;
             loadedCount = 0;
             withSalaryCount = 0;
             excludedCount = 0;
+            excludedBySuffixDetails = { ик: 0, ор: 0, ий: 0, ец: 0, ер: 0 }; // Сбрасываем при новом поиске
             totalFound = 0;
             vacanciesPerSecond = 0; // Сбрасываем при новом поиске
             
@@ -1478,7 +1575,7 @@ MAIN_HTML = '''
                         }
 
                         const fullText = `${basicVacancy.name} ${companyName} ${basicVacancy.snippet?.requirement || ''} ${basicVacancy.snippet?.responsibility || ''}`.toLowerCase();
-                        if (isExcluded(fullText)) {
+                        if (isExcluded(fullText) || shouldExcludeBySuffix(basicVacancy.name, currentQuery)) {
                             excludedCount++;
                             continue;
                         }
@@ -1678,7 +1775,7 @@ MAIN_HTML = '''
                         }
                         
                         const fullText = `${v.profession} ${companyName} ${v.candidat || ''} ${v.work || ''}`.toLowerCase();
-                        if (isExcluded(fullText)) {
+                        if (isExcluded(fullText) || shouldExcludeBySuffix(v.profession, currentQuery)) {
                             excludedCount++;
                             return;
                         }
@@ -1774,7 +1871,18 @@ MAIN_HTML = '''
             document.getElementById('statLoaded').textContent = loadedCount.toLocaleString();
             document.getElementById('statWithSalary').textContent = withSalaryCount.toLocaleString();
             document.getElementById('statExcluded').textContent = excludedCount.toLocaleString();
-            document.getElementById('statVps').textContent = vacanciesPerSecond.toFixed(2); // Отображаем с двумя знаками после запятой
+            
+            // Обновляем статистику по суффиксам
+            const suffixStat = document.getElementById('statSuffixExcluded');
+            if (document.getElementById('filterBySuffix')?.checked) {
+                suffixStat.style.display = 'block';
+                const total = excludedBySuffixDetails.ик + excludedBySuffixDetails.ор + excludedBySuffixDetails.ий + excludedBySuffixDetails.ец + excludedBySuffixDetails.ер;
+                document.getElementById('statSuffixCount').textContent = total.toLocaleString();
+                document.getElementById('suffixDetails').textContent = 
+                    `ик:${excludedBySuffixDetails.ик} ор:${excludedBySuffixDetails.ор} ий:${excludedBySuffixDetails.ий} ец:${excludedBySuffixDetails.ец} ер:${excludedBySuffixDetails.ер}`;
+            } else {
+                suffixStat.style.display = 'none';
+            }
         }
 
         window.addEventListener('scroll', () => {
