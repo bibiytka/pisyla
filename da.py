@@ -463,6 +463,7 @@ MAIN_HTML = '''
             padding: 25px;
             margin: 20px 0;
             border: 1px solid #e9ecef;
+            position: relative; /* Добавлено для абсолютного позиционирования дочерних элементов */
         }
         .filter-row {
             display: flex;
@@ -920,7 +921,7 @@ MAIN_HTML = '''
             </div>
 
             <button onclick="startNewSearch()" class="btn-search" style="margin-bottom: 10px;">🔎 Найти вакансии</button>
-            <button onclick="exportToExcel()" class="btn-search" style="background: #28a745;">📊 Экспорт в Excel</button>
+            <button onclick="exportToExcel()" class="btn-search" style="background: #28a745; position: absolute; top: 10px; right: 10px; z-index: 9999;">📊 Экспорт в Excel</button>
         </div>
 
         <div class="stats" id="stats" style="display: none;">
