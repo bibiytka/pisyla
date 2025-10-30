@@ -1012,11 +1012,11 @@ MAIN_HTML = '''
         const API_BASE = 'https://api.superjob.ru/2.0';
         const SUPERJOB_CLIENT_ID = '4014'; // Ваш client_id
         const SUPERJOB_SECRET_KEY = 'v3.r.138979256.3b5b15795a107a49a55e7f4e5eed1857dfe78cde.dda83a292af5754f027da2f0c96152b9b34f0dee'; // Ваш secret_key
-        const SUPERJOB_REDIRECT_URI = 'https://pisyla.onrender.com/callback';
+        const SUPERJOB_REDIRECT_URI = 'https://parsinghh.ru/callback';
 
         const HH_CLIENT_ID = 'OSG86UKP38OI11J3LN443EN7TU5NBIHVO9ACN312JO9O871KF3UNMRMHCJHF8AR5';
         const HH_CLIENT_SECRET = 'LI36ECQCQNAHR9QV9U9MMPI1B2N9EK4I90QCA3ER02ADL6JQ5LPHBD2L6265M27R';
-        const HH_REDIRECT_URI = 'https://pisyla.onrender.com/hh_callback';
+        const HH_REDIRECT_URI = 'http://www/parsinghh.ru/hh_callback';
 
         let sjAccessToken = localStorage.getItem('sj_access_token');
         let sjRefreshToken = localStorage.getItem('sj_refresh_token');
