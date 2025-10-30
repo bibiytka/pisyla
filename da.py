@@ -16,12 +16,12 @@ def favicon():
     return redirect(url_for('static', filename='favicon.ico'), code=302)
 
 # ============ ВШИТЫЕ CREDENTIALS ============
-SUPERJOB_APP_ID = "4014"
-SUPERJOB_SECRET_KEY = "v3.r.138979256.3b5b15795a107a49a55e7f4e5eed1857dfe78cde.dda83a292af5754f027da2f0c96152b9b34f0dee"
+SUPERJOB_APP_ID = "4026"
+SUPERJOB_SECRET_KEY = "v3.r.12927526.10d837407b8a8473388e07717fc9637f12e6c8f5.4b87d3ece83eae6dcd6f7f140c887aac0ab62b0e"
 
 HH_CLIENT_ID = "OSG86UKP38OI11J3LN443EN7TU5NBIHVO9ACN312JO9O871KF3UNMRMHCJHF8AR5"
 HH_CLIENT_SECRET = "LI36ECQCQNAHR9QV9U9MMPI1B2N9EK4I90QCA3ER02ADL6JQ5LPHBD2L6265M27R"
-HH_REDIRECT_URI = "https://pisyla.onrender.com/hh_callback"
+HH_REDIRECT_URI = "http://www/parsinghh.ru/hh_callback"
 
 # ============ ПРОКСИ ДЛЯ SUPERJOB API ============
 @app.route('/proxy')
